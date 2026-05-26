@@ -5,16 +5,14 @@ SDK oficial Go da Mupay para criar cobrancas PIX/cartao, cancelar assinaturas e 
 Instalacao no monorepo atual:
 
 ```bash
-go get github.com/marcosvbarra/mupay/sdks/go@latest
+go get github.com/mupaybr/mupay/sdks/go@latest
 ```
 
 Uso recomendado no codigo:
 
 ```go
-import mupaysdk "github.com/marcosvbarra/mupay/sdks/go"
+import mupaysdk "github.com/mupaybr/mupay-sdk-go"
 ```
-
-> Quer o nome publico bonito `github.com/mupay/mupay-sdk-go`? Veja [Publicacao](#publicacao). Em Go, o `module` precisa apontar para um repositorio publico que exista.
 
 ## Primeira cobranca em poucos minutos
 
@@ -26,7 +24,7 @@ import (
 	"fmt"
 	"os"
 
-	mupaysdk "github.com/marcosvbarra/mupay/sdks/go"
+	mupaysdk "github.com/mupaybr/mupay/sdks/go"
 )
 
 func main() {

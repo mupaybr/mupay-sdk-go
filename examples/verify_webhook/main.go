@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	mupaysdk "github.com/marcosvbarra/mupay/sdks/go"
+	mupaysdk "github.com/mupaybr/mupay/sdks/go"
 )
 
 func main() {

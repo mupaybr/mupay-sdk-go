@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	mupaysdk "github.com/marcosvbarra/mupay/sdks/go"
+	mupaysdk "github.com/mupaybr/mupay/sdks/go"
 )
 
 func TestChargesCreateGeneratesIdempotencyKeyAndPostsJSON(t *testing.T) {
