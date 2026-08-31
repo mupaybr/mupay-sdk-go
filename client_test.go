@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -80,6 +81,65 @@ func TestChargesCreatePreservesExplicitIdempotencyKey(t *testing.T) {
 	}
 	if gotKey != "order_456_charge_1" {
 		t.Fatalf("Idempotency-Key = %q", gotKey)
+	}
+}
+
+func TestChargeCreateRejectsAmountAboveMaximumBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return nil, errors.New("network must not be reached")
+		})}),
+	)
+
+	_, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
+		AmountCents:   9_000_000_000_000_001,
+		PaymentMethod: "pix",
+		Customer:      validCustomer(),
+	})
+	if err == nil {
+		t.Fatal("amount above maximum was accepted")
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
+func TestChargeCreateAcceptsMoneyBoundaryAmounts(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		var body mupag.ChargeCreateParams
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		writeJSON(writer, http.StatusCreated, fmt.Sprintf(
+			`{"charge_id":"charge_%d","amount_cents":%d,"status":"pending"}`,
+			requests,
+			body.AmountCents,
+		))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	for _, amount := range []int64{1, 9_000_000_000_000_000} {
+		charge, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
+			AmountCents:   amount,
+			PaymentMethod: "pix",
+			Customer:      validCustomer(),
+		})
+		if err != nil {
+			t.Fatalf("amount %d rejected: %v", amount, err)
+		}
+		if charge.AmountCents != amount {
+			t.Fatalf("response amount = %d, want %d", charge.AmountCents, amount)
+		}
+	}
+	if requests != 2 {
+		t.Fatalf("network requests = %d, want 2", requests)
 	}
 }
 

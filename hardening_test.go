@@ -239,7 +239,7 @@ func TestChargeCreateRejectsUnsafeOrAmbiguousPayloadsBeforeNetwork(t *testing.T)
 	)
 
 	invalid := []mupag.ChargeCreateParams{
-		{AmountCents: 99, PaymentMethod: "pix", Customer: validCustomer()},
+		{AmountCents: 0, PaymentMethod: "pix", Customer: validCustomer()},
 		{AmountCents: 100, PaymentMethod: "cash", Customer: validCustomer()},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: mupag.CustomerParams{}},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Metadata: map[string]any{"cvv": "123"}},

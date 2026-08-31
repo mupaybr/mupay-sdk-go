@@ -63,3 +63,45 @@ func TestChargesListRejectsInvalidFiltersBeforeNetwork(t *testing.T) {
 		t.Fatalf("network requests = %d, want 0", requests)
 	}
 }
+
+func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid charge id",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"},{"charge_id":"..","amount_cents":100,"status":"pending"}]}`,
+		},
+		{
+			name: "invalid charge status",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"},{"charge_id":"charge_2","amount_cents":100,"status":"unknown"}]}`,
+		},
+		{
+			name: "invalid charge amount",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"},{"charge_id":"charge_2","amount_cents":9000000000000001,"status":"pending"}]}`,
+		},
+		{
+			name: "unsafe next cursor",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"}],"next_cursor":"bad cursor"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				requests++
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			if _, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{}); err == nil {
+				t.Fatal("invalid charge page was accepted")
+			}
+			if requests != 1 {
+				t.Fatalf("network requests = %d, want 1", requests)
+			}
+		})
+	}
+}

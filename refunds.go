@@ -61,6 +61,23 @@ type RefundPage struct {
 	NextCursor string   `json:"next_cursor,omitempty"`
 }
 
+func (page *RefundPage) validateResponse() error {
+	if page == nil {
+		return errors.New("mupag: API returned an invalid refund page")
+	}
+	if page.NextCursor != "" {
+		if err := validateOpaqueCursor(page.NextCursor); err != nil {
+			return errors.New("mupag: API returned invalid next_cursor")
+		}
+	}
+	for index := range page.Refunds {
+		if err := page.Refunds[index].validateResponse(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Create solicita estorno parcial ou total com Idempotency-Key estável.
 func (service *RefundsService) Create(ctx context.Context, chargeID string, params RefundCreateParams, opts ...RequestOption) (*Refund, error) {
 	if !validResourceID(chargeID) {

@@ -111,6 +111,23 @@ type ChargePage struct {
 	NextCursor string   `json:"next_cursor,omitempty"`
 }
 
+func (page *ChargePage) validateResponse() error {
+	if page == nil {
+		return errors.New("mupag: API returned an invalid charge page")
+	}
+	if page.NextCursor != "" {
+		if err := validateOpaqueCursor(page.NextCursor); err != nil {
+			return errors.New("mupag: API returned invalid next_cursor")
+		}
+	}
+	for index := range page.Data {
+		if err := page.Data[index].validateResponse(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Create envia uma cobranca e gera Idempotency-Key quando o caller omite.
 func (service *ChargesService) Create(ctx context.Context, params ChargeCreateParams, opts ...RequestOption) (*Charge, error) {
 	if service.client.configErr != nil {
@@ -137,8 +154,8 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 }
 
 func validateChargeCreateParams(params ChargeCreateParams) error {
-	if params.AmountCents < 100 {
-		return errors.New("mupag: amount_cents must be at least 100")
+	if params.AmountCents < 1 || params.AmountCents > maxMoneyCents {
+		return errors.New("mupag: amount_cents must be between 1 and 9000000000000000")
 	}
 	if params.PaymentMethod != "pix" && params.PaymentMethod != "credit_card" {
 		return errors.New("mupag: payment_method must be pix or credit_card")
@@ -341,11 +358,6 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 	var page ChargePage
 	if err := service.client.do(ctx, http.MethodGet, "/v1/charges", query, nil, &page); err != nil {
 		return nil, err
-	}
-	if page.NextCursor != "" {
-		if err := validateOpaqueCursor(page.NextCursor); err != nil {
-			return nil, errors.New("mupag: API returned invalid next_cursor")
-		}
 	}
 	return &page, nil
 }

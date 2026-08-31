@@ -136,4 +136,42 @@ func TestRefundReadsRejectUnsafeIdentifiersAndPaginationBeforeNetwork(t *testing
 	}
 }
 
+func TestRefundsListByChargeRejectsInvalidItemsAndResponseCursor(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid refund item",
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"},{"refund_id":"..","charge_id":"charge_1","amount_cents":100,"status":"completed"}]}`,
+		},
+		{
+			name: "unsafe next cursor",
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"bad cursor"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				requests++
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			if _, err := newTestClient(server.URL).Refunds.ListByCharge(
+				context.Background(),
+				"charge_1",
+				mupag.RefundListParams{},
+			); err == nil {
+				t.Fatal("invalid refund page was accepted")
+			}
+			if requests != 1 {
+				t.Fatalf("network requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
 func int64Pointer(value int64) *int64 { return &value }
