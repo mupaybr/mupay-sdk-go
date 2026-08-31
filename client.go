@@ -179,6 +179,9 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 			requestOptions.idempotencyKey = "sdk-go-" + requestOptions.idempotencyKey
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	attempts := client.retryPolicy.MaxRetries + 1
 	if attempts < 1 {
 		attempts = 1
