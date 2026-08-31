@@ -94,6 +94,21 @@ func (charge *Charge) validateResponse() error {
 	return nil
 }
 
+type chargeCreateResponse struct {
+	Charge
+	expectedAmountCents int64
+}
+
+func (response *chargeCreateResponse) validateResponse() error {
+	if err := response.Charge.validateResponse(); err != nil {
+		return err
+	}
+	if response.AmountCents != response.expectedAmountCents {
+		return errors.New("mupag: API returned a charge amount that does not match the request")
+	}
+	return nil
+}
+
 // ChargeListParams representa filtros bounded do endpoint público de cobranças.
 type ChargeListParams struct {
 	Status        string
@@ -145,12 +160,12 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 	if err := validateChargeCreateParams(params); err != nil {
 		return nil, err
 	}
-	var charge Charge
-	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, params, &charge, opts...)
+	response := chargeCreateResponse{expectedAmountCents: params.AmountCents}
+	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, params, &response, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &charge, nil
+	return &response.Charge, nil
 }
 
 func validateChargeCreateParams(params ChargeCreateParams) error {

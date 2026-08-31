@@ -28,6 +28,21 @@ func (subscription *Subscription) validateResponse() error {
 	return nil
 }
 
+type subscriptionCancelResponse struct {
+	Subscription
+	expectedID string
+}
+
+func (response *subscriptionCancelResponse) validateResponse() error {
+	if err := response.Subscription.validateResponse(); err != nil {
+		return err
+	}
+	if response.ID != response.expectedID {
+		return errors.New("mupag: API returned a different subscription")
+	}
+	return nil
+}
+
 // CancelSubscriptionParams reflete o corpo exigido pelo endpoint real de cancelamento.
 type CancelSubscriptionParams struct {
 	Mode   string `json:"mode"`
@@ -45,13 +60,13 @@ func (service *SubscriptionsService) Cancel(ctx context.Context, id string, para
 	if len(params.Reason) > 500 {
 		return nil, errors.New("mupag: subscription cancel reason exceeds 500 bytes")
 	}
-	var subscription Subscription
+	response := subscriptionCancelResponse{expectedID: id}
 	path := "/v1/subscriptions/" + url.PathEscape(id) + "/cancel"
-	err := service.client.do(ctx, http.MethodPost, path, nil, params, &subscription, opts...)
+	err := service.client.do(ctx, http.MethodPost, path, nil, params, &response, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &subscription, nil
+	return &response.Subscription, nil
 }
 
 func validResourceID(value string) bool {

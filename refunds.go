@@ -49,6 +49,26 @@ func (refund *Refund) validateResponse() error {
 	return nil
 }
 
+type refundCreateResponse struct {
+	Refund
+	expectedChargeID    string
+	expectedAmountCents int64
+	correlateAmount     bool
+}
+
+func (response *refundCreateResponse) validateResponse() error {
+	if err := response.Refund.validateResponse(); err != nil {
+		return err
+	}
+	if response.ChargeID != response.expectedChargeID {
+		return errors.New("mupag: API returned a refund for a different charge")
+	}
+	if response.correlateAmount && response.AmountCents != response.expectedAmountCents {
+		return errors.New("mupag: API returned a refund amount that does not match the request")
+	}
+	return nil
+}
+
 // RefundListParams limita paginação keyset no endpoint de reconciliação.
 type RefundListParams struct {
 	Limit  int
@@ -94,12 +114,18 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 		return nil, errors.New("mupag: refund reason exceeds 500 bytes")
 	}
 
-	var refund Refund
+	response := refundCreateResponse{
+		expectedChargeID: chargeID,
+		correlateAmount:  hasAmount,
+	}
+	if hasAmount {
+		response.expectedAmountCents = *params.AmountCents
+	}
 	path := "/v1/charges/" + url.PathEscape(chargeID) + "/refunds"
-	if err := service.client.do(ctx, http.MethodPost, path, nil, params, &refund, opts...); err != nil {
+	if err := service.client.do(ctx, http.MethodPost, path, nil, params, &response, opts...); err != nil {
 		return nil, err
 	}
-	return &refund, nil
+	return &response.Refund, nil
 }
 
 // Get consulta um estorno no escopo do merchant autenticado.
