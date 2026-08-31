@@ -1,3 +1,3 @@
-module github.com/mupaybr/mupay/sdks/go
+module github.com/mupaybr/mupag-sdk-go
 
-go 1.23
+go 1.26.5

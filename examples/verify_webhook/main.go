@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"os"
 
-	mupaysdk "github.com/mupaybr/mupay/sdks/go"
+	mupag "github.com/mupaybr/mupag-sdk-go"
 )
 
 func main() {
-	payload := []byte(os.Getenv("MUPAY_WEBHOOK_PAYLOAD"))
-	signature := os.Getenv("MUPAY_WEBHOOK_SIGNATURE")
-	secret := os.Getenv("MUPAY_WEBHOOK_SECRET")
+	payload := []byte(os.Getenv("MUPAG_WEBHOOK_PAYLOAD"))
+	signature := os.Getenv("MUPAG_WEBHOOK_SIGNATURE")
+	secret := os.Getenv("MUPAG_WEBHOOK_SECRET")
 
-	event, err := mupaysdk.Webhooks.ConstructEvent(payload, signature, secret)
+	event, err := mupag.Webhooks.ConstructEvent(payload, signature, secret)
 	if err != nil {
 		panic(err)
 	}

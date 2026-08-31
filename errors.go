@@ -1,4 +1,4 @@
-package mupaysdk
+package mupag
 
 import (
 	"encoding/json"
@@ -17,15 +17,40 @@ type APIError struct {
 	Detail     string
 }
 
+// OutcomeUnknownError informa que uma mutacao pode ter sido aceita, mas a
+// resposta final nao chegou ao SDK. Reutilize IdempotencyKey com o mesmo
+// payload para consultar ou repetir a mesma operacao sem cria-la novamente.
+type OutcomeUnknownError struct {
+	IdempotencyKey string
+	cause          error
+}
+
+// Error evita incluir a chave em logs por acidente; ela continua disponivel
+// no campo estruturado IdempotencyKey.
+func (err *OutcomeUnknownError) Error() string {
+	if err == nil || err.cause == nil {
+		return "mupag: mutation outcome is unknown; reuse the exposed idempotency key with the same payload"
+	}
+	return fmt.Sprintf("mupag: mutation outcome is unknown; reuse the exposed idempotency key with the same payload: %v", err.cause)
+}
+
+// Unwrap preserva o erro de transporte ou API que tornou o resultado ambiguo.
+func (err *OutcomeUnknownError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.cause
+}
+
 // Error resume o erro sem incluir payload sensivel.
 func (err *APIError) Error() string {
 	if err == nil {
 		return ""
 	}
 	if err.Code != "" {
-		return fmt.Sprintf("mupay api error: status=%d code=%s request_id=%s", err.StatusCode, err.Code, err.RequestID)
+		return fmt.Sprintf("mupag api error: status=%d code=%s request_id=%s", err.StatusCode, err.Code, err.RequestID)
 	}
-	return fmt.Sprintf("mupay api error: status=%d", err.StatusCode)
+	return fmt.Sprintf("mupag api error: status=%d", err.StatusCode)
 }
 
 // RateLimitError adiciona Retry-After ao erro tipado de HTTP 429.
@@ -85,9 +110,25 @@ func decodeAPIError(statusCode int, headers http.Header, body []byte) error {
 }
 
 func retryAfter(value string) time.Duration {
-	seconds, err := strconv.Atoi(value)
-	if err != nil || seconds < 0 {
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds < 0 {
+			return 0
+		}
+		if seconds > 30 {
+			seconds = 30
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
 		return 0
 	}
-	return time.Duration(seconds) * time.Second
+	delay := time.Until(retryAt)
+	if delay <= 0 {
+		return 0
+	}
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }

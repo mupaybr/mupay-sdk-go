@@ -1,14 +1,15 @@
-package mupaysdk_test
+package mupag_test
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	mupaysdk "github.com/mupaybr/mupay/sdks/go"
+	mupag "github.com/mupaybr/mupag-sdk-go"
 )
 
 func TestWebhookConstructEventAcceptsFreshValidSignature(t *testing.T) {
@@ -16,7 +17,7 @@ func TestWebhookConstructEventAcceptsFreshValidSignature(t *testing.T) {
 	payload := []byte(`{"id":"evt_123","type":"charge.paid","data":{"charge_id":"ch_123"}}`)
 	header := signatureHeader(now, payload, "whsec_123")
 
-	event, err := mupaysdk.Webhooks.ConstructEvent(payload, header, "whsec_123", mupaysdk.WithWebhookNow(now))
+	event, err := mupag.Webhooks.ConstructEvent(payload, header, "whsec_123", mupag.WithWebhookNow(now))
 	if err != nil {
 		t.Fatalf("construct event: %v", err)
 	}
@@ -30,12 +31,26 @@ func TestWebhookConstructEventAcceptsFreshValidSignature(t *testing.T) {
 
 func TestWebhookConstructEventRejectsInvalidSignature(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	payload := []byte(`{"id":"evt_123","type":"charge.paid"}`)
+	payload := []byte(`{"id":"evt_123","type":"charge.paid","data":{}}`)
 	header := signatureHeader(now, payload, "whsec_123")
 
-	_, err := mupaysdk.Webhooks.ConstructEvent(payload, header, "wrong_secret", mupaysdk.WithWebhookNow(now))
+	_, err := mupag.Webhooks.ConstructEvent(payload, header, "wrong_secret", mupag.WithWebhookNow(now))
 	if err == nil {
 		t.Fatal("expected invalid signature error")
+	}
+}
+
+func TestWebhookConstructEventRejectsNonObjectData(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	for _, payload := range [][]byte{
+		[]byte(`{"id":"evt_123","type":"charge.paid"}`),
+		[]byte(`{"id":"evt_123","type":"charge.paid","data":null}`),
+		[]byte(`{"id":"evt_123","type":"charge.paid","data":[]}`),
+	} {
+		header := signatureHeader(now, payload, "whsec_123")
+		if _, err := mupag.Webhooks.ConstructEvent(payload, header, "whsec_123", mupag.WithWebhookNow(now)); err == nil {
+			t.Fatalf("accepted non-object data: %s", payload)
+		}
 	}
 }
 
@@ -45,7 +60,7 @@ func TestWebhookConstructEventRejectsStaleTimestamp(t *testing.T) {
 	payload := []byte(`{"id":"evt_123","type":"charge.paid"}`)
 	header := signatureHeader(signedAt, payload, "whsec_123")
 
-	_, err := mupaysdk.Webhooks.ConstructEvent(payload, header, "whsec_123", mupaysdk.WithWebhookNow(now))
+	_, err := mupag.Webhooks.ConstructEvent(payload, header, "whsec_123", mupag.WithWebhookNow(now))
 	if err == nil {
 		t.Fatal("expected stale timestamp error")
 	}
@@ -54,15 +69,15 @@ func TestWebhookConstructEventRejectsStaleTimestamp(t *testing.T) {
 func TestWebhookConstructEventAcceptsCustomTolerance(t *testing.T) {
 	signedAt := time.Unix(1_700_000_000, 0)
 	now := signedAt.Add(6 * time.Minute)
-	payload := []byte(`{"id":"evt_123","type":"charge.paid"}`)
+	payload := []byte(`{"id":"evt_123","type":"charge.paid","data":{}}`)
 	header := signatureHeader(signedAt, payload, "whsec_123")
 
-	event, err := mupaysdk.Webhooks.ConstructEvent(
+	event, err := mupag.Webhooks.ConstructEvent(
 		payload,
 		header,
 		"whsec_123",
-		mupaysdk.WithWebhookNow(now),
-		mupaysdk.WithWebhookTolerance(10*time.Minute),
+		mupag.WithWebhookNow(now),
+		mupag.WithWebhookTolerance(10*time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("construct event: %v", err)
@@ -76,15 +91,25 @@ func TestWebhookConstructEventRejectsMalformedInputs(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	payload := []byte(`{"id":"evt_123","type":"charge.paid"}`)
 
-	if _, err := mupaysdk.Webhooks.ConstructEvent(payload, "v1=abc", "whsec_123", mupaysdk.WithWebhookNow(now)); err == nil {
+	if _, err := mupag.Webhooks.ConstructEvent(payload, "v1=abc", "whsec_123", mupag.WithWebhookNow(now)); err == nil {
 		t.Fatal("expected missing timestamp error")
 	}
-	if _, err := mupaysdk.Webhooks.ConstructEvent(payload, "t=not-a-number,v1=abc", "whsec_123", mupaysdk.WithWebhookNow(now)); err == nil {
+	if _, err := mupag.Webhooks.ConstructEvent(payload, "t=not-a-number,v1=abc", "whsec_123", mupag.WithWebhookNow(now)); err == nil {
 		t.Fatal("expected invalid timestamp error")
+	}
+	valid := signatureHeader(now, payload, "whsec_123")
+	for _, header := range []string{
+		"t=1e3,v1=" + strings.Repeat("a", 64),
+		valid + ",t=" + strconv.FormatInt(now.Unix(), 10),
+		valid + ",v1=" + strings.Repeat("a", 64),
+	} {
+		if _, err := mupag.Webhooks.ConstructEvent(payload, header, "whsec_123", mupag.WithWebhookNow(now)); err == nil {
+			t.Fatalf("accepted ambiguous signature header: %s", header)
+		}
 	}
 
 	header := signatureHeader(now, []byte(`not-json`), "whsec_123")
-	if _, err := mupaysdk.Webhooks.ConstructEvent([]byte(`not-json`), header, "whsec_123", mupaysdk.WithWebhookNow(now)); err == nil {
+	if _, err := mupag.Webhooks.ConstructEvent([]byte(`not-json`), header, "whsec_123", mupag.WithWebhookNow(now)); err == nil {
 		t.Fatal("expected invalid payload error")
 	}
 }

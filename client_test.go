@@ -1,4 +1,4 @@
-package mupaysdk_test
+package mupag_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	mupaysdk "github.com/mupaybr/mupay/sdks/go"
+	mupag "github.com/mupaybr/mupag-sdk-go"
 )
 
 func TestChargesCreateGeneratesIdempotencyKeyAndPostsJSON(t *testing.T) {
@@ -36,16 +36,17 @@ func TestChargesCreateGeneratesIdempotencyKeyAndPostsJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := mupaysdk.NewClient(
-		mupaysdk.WithAPIKey("sk_test_123"),
-		mupaysdk.WithBaseURL(server.URL),
-		mupaysdk.WithRetryPolicy(mupaysdk.RetryPolicy{MaxRetries: 0}),
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithBaseURL(server.URL),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
 	)
 
-	charge, err := client.Charges.Create(context.Background(), mupaysdk.ChargeCreateParams{
+	charge, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
 		AmountCents:   9900,
 		PaymentMethod: "pix",
-		Customer: mupaysdk.CustomerParams{
+		Customer: mupag.CustomerParams{
 			Name:  "Ana Silva",
 			Email: "ana@example.test",
 			TaxID: "12345678901",
@@ -71,14 +72,42 @@ func TestChargesCreatePreservesExplicitIdempotencyKey(t *testing.T) {
 
 	_, err := client.Charges.Create(
 		context.Background(),
-		mupaysdk.ChargeCreateParams{AmountCents: 14990, PaymentMethod: "pix", Customer: mupaysdk.CustomerParams{ID: "22222222-2222-2222-2222-222222222222"}},
-		mupaysdk.WithIdempotencyKey("order_456_charge_1"),
+		mupag.ChargeCreateParams{AmountCents: 14990, PaymentMethod: "pix", Customer: validCustomer()},
+		mupag.WithIdempotencyKey("order_456_charge_1"),
 	)
 	if err != nil {
 		t.Fatalf("create charge: %v", err)
 	}
 	if gotKey != "order_456_charge_1" {
 		t.Fatalf("Idempotency-Key = %q", gotKey)
+	}
+}
+
+func TestCardChargeForwardsLiteralPayerIPAndSingleInstallment(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		writeJSON(w, http.StatusCreated, `{"charge_id":"card_1","amount_cents":14990,"psp_charge_id":"asaas_1","status":"pending"}`)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	_, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
+		AmountCents:            14990,
+		PaymentMethod:          "credit_card",
+		Customer:               validCustomer(),
+		CardTokenID:            "token_123",
+		PayerIP:                "2001:db8::1",
+		Installments:           1,
+		ProductMaxInstallments: 1,
+	})
+	if err != nil {
+		t.Fatalf("create card charge: %v", err)
+	}
+	if body["payer_ip"] != "2001:db8::1" || body["installments"] != float64(1) || body["product_max_installments"] != float64(1) {
+		t.Fatalf("body = %v", body)
 	}
 }
 
@@ -90,10 +119,12 @@ func TestAPIProblemDetailsBecomesTypedError(t *testing.T) {
 
 	client := newTestClient(server.URL)
 
-	_, err := client.Charges.Create(context.Background(), mupaysdk.ChargeCreateParams{AmountCents: 0, PaymentMethod: "pix"})
-	var apiErr *mupaysdk.APIError
+	_, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
+		AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(),
+	})
+	var apiErr *mupag.APIError
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("err = %T, want *mupaysdk.APIError", err)
+		t.Fatalf("err = %T, want *mupag.APIError", err)
 	}
 	if apiErr.StatusCode != http.StatusUnprocessableEntity || apiErr.Code != "invalid_amount" || apiErr.RequestID != "req_123" {
 		t.Fatalf("apiErr = %+v", apiErr)
@@ -109,10 +140,10 @@ func TestRateLimitErrorIncludesRetryAfter(t *testing.T) {
 
 	client := newTestClient(server.URL)
 
-	_, err := client.Subscriptions.Cancel(context.Background(), "sub_123", mupaysdk.CancelSubscriptionParams{Mode: "immediate"}, mupaysdk.WithIdempotencyKey("cancel_sub_123"))
-	var rateErr *mupaysdk.RateLimitError
+	_, err := client.Subscriptions.Cancel(context.Background(), "sub_123", mupag.CancelSubscriptionParams{Mode: "immediate"}, mupag.WithIdempotencyKey("cancel_sub_123"))
+	var rateErr *mupag.RateLimitError
 	if !errors.As(err, &rateErr) {
-		t.Fatalf("err = %T, want *mupaysdk.RateLimitError", err)
+		t.Fatalf("err = %T, want *mupag.RateLimitError", err)
 	}
 	if rateErr.RetryAfter != 7*time.Second {
 		t.Fatalf("RetryAfter = %s", rateErr.RetryAfter)
@@ -131,16 +162,17 @@ func TestRetriesTransientServerErrorThenReturnsSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := mupaysdk.NewClient(
-		mupaysdk.WithAPIKey("sk_test_123"),
-		mupaysdk.WithBaseURL(server.URL),
-		mupaysdk.WithRetryPolicy(mupaysdk.RetryPolicy{MaxRetries: 1, BaseDelay: 0}),
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithBaseURL(server.URL),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 1, BaseDelay: 0}),
 	)
 
-	charge, err := client.Charges.Create(context.Background(), mupaysdk.ChargeCreateParams{
+	charge, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
 		AmountCents:   5000,
 		PaymentMethod: "pix",
-		Customer:      mupaysdk.CustomerParams{ID: "22222222-2222-2222-2222-222222222222"},
+		Customer:      validCustomer(),
 	})
 	if err != nil {
 		t.Fatalf("create charge: %v", err)
@@ -170,8 +202,8 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 	subscription, err := client.Subscriptions.Cancel(
 		context.Background(),
 		"sub_123",
-		mupaysdk.CancelSubscriptionParams{Mode: "immediate", Reason: "pedido do cliente"},
-		mupaysdk.WithIdempotencyKey("cancel_sub_123"),
+		mupag.CancelSubscriptionParams{Mode: "immediate", Reason: "pedido do cliente"},
+		mupag.WithIdempotencyKey("cancel_sub_123"),
 	)
 	if err != nil {
 		t.Fatalf("cancel subscription: %v", err)
@@ -183,7 +215,7 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 
 func TestClientCanUseSandboxEnvironmentWithCustomHTTPClient(t *testing.T) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "api.sandbox.mupay.com.br" {
+		if r.URL.Host != "api.sandbox.mupag.com.br" {
 			t.Fatalf("host = %s", r.URL.Host)
 		}
 		return &http.Response{
@@ -192,17 +224,17 @@ func TestClientCanUseSandboxEnvironmentWithCustomHTTPClient(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"charge_id":"dddddddd-dddd-dddd-dddd-dddddddddddd","amount_cents":100,"psp_charge_id":"woovi_env","status":"pending"}`)),
 		}, nil
 	})
-	client := mupaysdk.NewClient(
-		mupaysdk.WithAPIKey("sk_test_123"),
-		mupaysdk.WithTestEnvironment(),
-		mupaysdk.WithHTTPClient(&http.Client{Transport: transport}),
-		mupaysdk.WithRetryPolicy(mupaysdk.RetryPolicy{MaxRetries: 0}),
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithHTTPClient(&http.Client{Transport: transport}),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
 	)
 
-	charge, err := client.Charges.Create(context.Background(), mupaysdk.ChargeCreateParams{
+	charge, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
 		AmountCents:   100,
 		PaymentMethod: "pix",
-		Customer:      mupaysdk.CustomerParams{ID: "22222222-2222-2222-2222-222222222222"},
+		Customer:      validCustomer(),
 	})
 	if err != nil {
 		t.Fatalf("create charge: %v", err)
@@ -213,26 +245,27 @@ func TestClientCanUseSandboxEnvironmentWithCustomHTTPClient(t *testing.T) {
 }
 
 func TestTypedErrorMessagesAreSanitized(t *testing.T) {
-	apiErr := &mupaysdk.APIError{StatusCode: 422, Code: "invalid_amount", RequestID: "req_123"}
+	apiErr := &mupag.APIError{StatusCode: 422, Code: "invalid_amount", RequestID: "req_123"}
 	if got := apiErr.Error(); !strings.Contains(got, "invalid_amount") || !strings.Contains(got, "req_123") {
 		t.Fatalf("api error string = %q", got)
 	}
 
-	rateErr := &mupaysdk.RateLimitError{APIError: *apiErr, RetryAfter: 7 * time.Second}
+	rateErr := &mupag.RateLimitError{APIError: *apiErr, RetryAfter: 7 * time.Second}
 	if got := rateErr.Error(); !strings.Contains(got, "invalid_amount") {
 		t.Fatalf("rate error string = %q", got)
 	}
-	var unwrapped *mupaysdk.APIError
+	var unwrapped *mupag.APIError
 	if !errors.As(rateErr, &unwrapped) {
 		t.Fatal("expected RateLimitError to unwrap as APIError")
 	}
 }
 
-func newTestClient(baseURL string) *mupaysdk.Client {
-	return mupaysdk.NewClient(
-		mupaysdk.WithAPIKey("sk_test_123"),
-		mupaysdk.WithBaseURL(baseURL),
-		mupaysdk.WithRetryPolicy(mupaysdk.RetryPolicy{MaxRetries: 0}),
+func newTestClient(baseURL string) *mupag.Client {
+	return mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithBaseURL(baseURL),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
 	)
 }
 
