@@ -35,3 +35,36 @@ func TestReadmeDocumentsTruthfulGoModuleMigration(t *testing.T) {
 		t.Fatal("README names the former personal-owner module path")
 	}
 }
+
+func TestReadmeMigrationConfiguresProductionAndSandboxExplicitly(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("README.md"))
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+
+	migrationStart := strings.Index(string(readme), "## Migracao")
+	if migrationStart == -1 {
+		t.Fatal("README does not contain the migration section")
+	}
+	migration := string(readme[migrationStart:])
+	codeStart := strings.Index(migration, "```go")
+	if codeStart == -1 {
+		t.Fatal("migration section does not contain a Go example")
+	}
+	codeStart += len("```go")
+	codeEnd := strings.Index(migration[codeStart:], "```")
+	if codeEnd == -1 {
+		t.Fatal("migration Go example is not closed")
+	}
+	productionExample := migration[codeStart : codeStart+codeEnd]
+	if !strings.Contains(productionExample, "mupag.NewClient(") ||
+		!strings.Contains(productionExample, "mupag.WithPrdEnvironment()") {
+		t.Fatal("migration example does not configure the production environment")
+	}
+	if strings.Contains(productionExample, "mupag.WithTestEnvironment()") {
+		t.Fatal("migration production example configures the test environment")
+	}
+	if !strings.Contains(migration, "mupag.WithTestEnvironment()") {
+		t.Fatal("migration section does not document the sandbox/test environment")
+	}
+}

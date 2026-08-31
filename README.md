@@ -208,3 +208,17 @@ O caminho canonico do modulo e `github.com/mupaybr/mupag-sdk-go`; instale a vers
 ## Migracao
 
 O repositorio historico dedicado `mupaybr/mupay-sdk-go` e o caminho de modulo anterior `github.com/mupaybr/mupay/sdks/go` nao sao mais suportados. Atualize os imports para `github.com/mupaybr/mupag-sdk-go` e mantenha o alias de pacote `mupag`.
+
+A migracao tambem exige selecionar o ambiente explicitamente. Em producao, configure o client com
+uma chave `sk_prd_` e `WithPrdEnvironment()`:
+
+```go
+client := mupag.NewClient(
+	mupag.WithAPIKey(os.Getenv("MUPAG_API_KEY")),
+	mupag.WithPrdEnvironment(),
+)
+```
+
+Em sandbox ou teste, use uma chave `sk_test_` com `mupag.WithTestEnvironment()`. O client falha
+fechado quando o ambiente e omitido ou quando o prefixo da chave nao corresponde ao ambiente;
+portanto, trocar somente o modulo e os imports nao conclui a migracao.
