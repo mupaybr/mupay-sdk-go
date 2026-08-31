@@ -154,8 +154,8 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 }
 
 func validateChargeCreateParams(params ChargeCreateParams) error {
-	if params.AmountCents < 1 || params.AmountCents > maxMoneyCents {
-		return errors.New("mupag: amount_cents must be between 1 and 9000000000000000")
+	if params.AmountCents < 100 || params.AmountCents > maxMoneyCents {
+		return errors.New("mupag: amount_cents must be between 100 and 9000000000000000")
 	}
 	if params.PaymentMethod != "pix" && params.PaymentMethod != "credit_card" {
 		return errors.New("mupag: payment_method must be pix or credit_card")

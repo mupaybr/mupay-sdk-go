@@ -84,7 +84,7 @@ func TestChargesCreatePreservesExplicitIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestChargeCreateRejectsAmountAboveMaximumBeforeNetwork(t *testing.T) {
+func TestChargeCreateRejectsMoneyOutsideSupportedRangeBeforeNetwork(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
 		mupag.WithAPIKey("sk_test_123"),
@@ -95,13 +95,15 @@ func TestChargeCreateRejectsAmountAboveMaximumBeforeNetwork(t *testing.T) {
 		})}),
 	)
 
-	_, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
-		AmountCents:   9_000_000_000_000_001,
-		PaymentMethod: "pix",
-		Customer:      validCustomer(),
-	})
-	if err == nil {
-		t.Fatal("amount above maximum was accepted")
+	for _, amount := range []int64{99, 9_000_000_000_000_001} {
+		_, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
+			AmountCents:   amount,
+			PaymentMethod: "pix",
+			Customer:      validCustomer(),
+		})
+		if err == nil {
+			t.Fatalf("amount %d outside supported range was accepted", amount)
+		}
 	}
 	if requests != 0 {
 		t.Fatalf("network requests = %d, want 0", requests)
@@ -125,7 +127,7 @@ func TestChargeCreateAcceptsMoneyBoundaryAmounts(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	for _, amount := range []int64{1, 9_000_000_000_000_000} {
+	for _, amount := range []int64{100, 9_000_000_000_000_000} {
 		charge, err := client.Charges.Create(context.Background(), mupag.ChargeCreateParams{
 			AmountCents:   amount,
 			PaymentMethod: "pix",
