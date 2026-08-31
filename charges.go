@@ -88,7 +88,7 @@ func (charge *Charge) validateResponse() error {
 	if _, ok := validStatuses[charge.Status]; !ok {
 		return errors.New("mupag: API returned an invalid charge status")
 	}
-	if charge.AmountCents < 1 || charge.AmountCents > maxMoneyCents {
+	if charge.AmountCents < 100 || charge.AmountCents > maxMoneyCents {
 		return errors.New("mupag: API returned an invalid charge amount")
 	}
 	return nil

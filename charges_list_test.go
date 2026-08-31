@@ -82,6 +82,10 @@ func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"},{"charge_id":"charge_2","amount_cents":9000000000000001,"status":"pending"}]}`,
 		},
 		{
+			name: "charge amount below minimum",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":99,"status":"pending"}]}`,
+		},
+		{
 			name: "unsafe next cursor",
 			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"}],"next_cursor":"bad cursor"}`,
 		},

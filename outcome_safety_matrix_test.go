@@ -171,6 +171,60 @@ func TestMutationIdempotencyConflictCodesHaveDistinctSemantics(t *testing.T) {
 	})
 }
 
+func TestMutationReadableConflictRequiresUsableCode(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantUnknown bool
+		wantCode    string
+	}{
+		{name: "malformed JSON", body: `{`, wantUnknown: true},
+		{name: "missing code", body: `{}`, wantUnknown: true},
+		{name: "empty code", body: `{"code":""}`, wantUnknown: true},
+		{name: "fallback code", body: `{"code":"http_409"}`, wantUnknown: true},
+		{name: "recognized fingerprint conflict", body: `{"code":"fingerprint_conflict"}`, wantCode: "fingerprint_conflict"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			client := testClientWithResults(
+				t,
+				0,
+				[]roundTripResult{{response: jsonHTTPResponse(http.StatusConflict, test.body)}},
+				&attempts,
+				nil,
+			)
+
+			_, err := client.Charges.Create(
+				context.Background(),
+				validPixCharge(),
+				mupag.WithIdempotencyKey("readable-conflict-key"),
+			)
+			var outcomeErr *mupag.OutcomeUnknownError
+			if test.wantUnknown {
+				if !errors.As(err, &outcomeErr) {
+					t.Fatalf("err = %T (%v), want outcome unknown", err, err)
+				}
+				if outcomeErr.IdempotencyKey != "readable-conflict-key" {
+					t.Fatalf("idempotency key = %q", outcomeErr.IdempotencyKey)
+				}
+			} else {
+				if errors.As(err, &outcomeErr) {
+					t.Fatalf("recognized conflict reported unknown: %v", err)
+				}
+				var apiErr *mupag.APIError
+				if !errors.As(err, &apiErr) || apiErr.Code != test.wantCode {
+					t.Fatalf("api error = %#v, want code %q", apiErr, test.wantCode)
+				}
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
 func TestMutationOnlyValid2xxConfirmsOutcome(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -181,6 +235,7 @@ func TestMutationOnlyValid2xxConfirmsOutcome(t *testing.T) {
 		{name: "empty object", response: jsonHTTPResponse(201, `{}`)},
 		{name: "malformed JSON", response: jsonHTTPResponse(201, `{`)},
 		{name: "invalid economics", response: jsonHTTPResponse(201, `{"charge_id":"ch_1","status":"pending","amount_cents":-1}`)},
+		{name: "amount below minimum", response: jsonHTTPResponse(201, `{"charge_id":"ch_1","status":"pending","amount_cents":99}`)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
