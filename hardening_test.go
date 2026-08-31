@@ -146,7 +146,7 @@ func TestSubscriptionCancelRejectsPathInjectionAndUnknownModeBeforeNetwork(t *te
 	for _, params := range []struct {
 		id   string
 		mode string
-	}{{"../charges", "immediate"}, {"sub_123", "later"}} {
+	}{{"../charges", "immediate"}, {".", "immediate"}, {"..", "immediate"}, {"sub_123", "later"}} {
 		_, err := client.Subscriptions.Cancel(
 			context.Background(),
 			params.id,

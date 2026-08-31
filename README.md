@@ -207,4 +207,4 @@ O caminho canonico do modulo e `github.com/mupaybr/mupag-sdk-go`; instale a vers
 
 ## Migracao
 
-Os caminhos historicos `github.com/mupaybr/mupay-sdk-go` e `github.com/marcosvbarra/mupay/sdks/go` nao sao mais suportados. Atualize os imports para `github.com/mupaybr/mupag-sdk-go` e mantenha o alias de pacote `mupag`.
+O repositorio historico dedicado `mupaybr/mupay-sdk-go` e o caminho de modulo anterior `github.com/mupaybr/mupay/sdks/go` nao sao mais suportados. Atualize os imports para `github.com/mupaybr/mupag-sdk-go` e mantenha o alias de pacote `mupag`.

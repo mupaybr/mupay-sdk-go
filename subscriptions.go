@@ -58,6 +58,9 @@ func validResourceID(value string) bool {
 	if len(value) < 1 || len(value) > 256 {
 		return false
 	}
+	if value == "." || value == ".." {
+		return false
+	}
 	for _, character := range []byte(value) {
 		if !((character >= 'a' && character <= 'z') ||
 			(character >= 'A' && character <= 'Z') ||
