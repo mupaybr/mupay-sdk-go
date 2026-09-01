@@ -274,6 +274,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 	for _, key := range []string{
 		"cvv2", "cvc2", "cardCvv", "cardSecurityCode", "cardVerificationCode",
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
+		"cvv2_value", "cvc2Code", "cardCvv3Number",
 	} {
 		t.Run(key, func(t *testing.T) {
 			params := validPixCharge()
