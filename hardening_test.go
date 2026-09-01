@@ -3,6 +3,7 @@ package mupag_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -91,7 +92,6 @@ func TestClientRejectsCrossOriginBaseURLAndUnsafeAPIKeyBeforeNetwork(t *testing.
 			},
 		},
 	}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			options := append(test.options, mupag.WithHTTPClient(&http.Client{Transport: transport}))
@@ -301,6 +301,27 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 			metadata: map[string]any{"note": int64(4111111111111111)},
 		},
 	}
+	for _, pan := range []string{
+		"412345678905",
+		"4123456789011",
+		"41234567890120",
+		"412345678901233",
+		"4123456789012349",
+		"41234567890123458",
+		"412345678901234561",
+		"4123456789012345677",
+	} {
+		tests = append(tests,
+			struct {
+				name     string
+				metadata map[string]any
+			}{name: fmt.Sprintf("%d-digit PAN with continuous prefix", len(pan)), metadata: map[string]any{"note": "9" + pan}},
+			struct {
+				name     string
+				metadata map[string]any
+			}{name: fmt.Sprintf("%d-digit PAN with continuous suffix", len(pan)), metadata: map[string]any{"note": pan + "9"}},
+		)
+	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -316,7 +337,7 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 	}
 
 	params := validPixCharge()
-	params.Metadata = map[string]any{"note": "4111 1111 1111 1112"}
+	params.Metadata = map[string]any{"note": "1000 0000 0000 1000"}
 	if _, err := client.Charges.Create(context.Background(), params); err != nil {
 		t.Fatalf("non-Luhn metadata was rejected: %v", err)
 	}

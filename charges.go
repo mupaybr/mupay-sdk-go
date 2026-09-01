@@ -411,13 +411,6 @@ func validateMetadata(metadata map[string]any) error {
 
 func containsPANLikeSequence(value string) bool {
 	digits := make([]byte, 0, 19)
-	digitCount := 0
-	flush := func() bool {
-		matched := digitCount <= 16 && validPANSequence(digits)
-		digits = digits[:0]
-		digitCount = 0
-		return matched
-	}
 	for _, character := range value {
 		switch {
 		case character >= '0' && character <= '9':
@@ -426,23 +419,18 @@ func containsPANLikeSequence(value string) bool {
 				digits = digits[:18]
 			}
 			digits = append(digits, byte(character))
-			digitCount++
-			if digitCount > 16 {
-				for length := 12; length <= len(digits); length++ {
-					if validPANSequence(digits[len(digits)-length:]) {
-						return true
-					}
+			for length := 12; length <= len(digits); length++ {
+				if validPANSequence(digits[len(digits)-length:]) {
+					return true
 				}
 			}
 		case unicode.IsSpace(character) || unicode.IsPunct(character):
 			continue
 		default:
-			if flush() {
-				return true
-			}
+			digits = digits[:0]
 		}
 	}
-	return flush()
+	return false
 }
 
 func validPANSequence(digits []byte) bool {
