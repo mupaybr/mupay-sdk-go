@@ -81,7 +81,7 @@ func (charge *Charge) validateResponse() error {
 		return errors.New("mupag: API returned an invalid charge_id")
 	}
 	validStatuses := map[string]struct{}{
-		"created": {}, "pending": {}, "authorized": {}, "paid": {},
+		"created": {}, "pending": {}, "authorized": {}, "under_review": {}, "paid": {},
 		"partially_refunded": {}, "refunded": {}, "failed": {}, "expired": {},
 		"cancelled": {}, "disputed": {}, "chargeback": {},
 	}
@@ -97,13 +97,15 @@ func (charge *Charge) validateResponse() error {
 type chargeCreateResponse struct {
 	Charge
 	expectedAmountCents int64
+	allowDiscount       bool
 }
 
 func (response *chargeCreateResponse) validateResponse() error {
 	if err := response.Charge.validateResponse(); err != nil {
 		return err
 	}
-	if response.AmountCents != response.expectedAmountCents {
+	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
+		(!response.allowDiscount && response.AmountCents != response.expectedAmountCents) {
 		return errors.New("mupag: API returned a charge amount that does not match the request")
 	}
 	return nil
@@ -210,7 +212,10 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 	if err := validateChargeCreateParams(params); err != nil {
 		return nil, err
 	}
-	response := chargeCreateResponse{expectedAmountCents: params.AmountCents}
+	response := chargeCreateResponse{
+		expectedAmountCents: params.AmountCents,
+		allowDiscount:       strings.TrimSpace(params.CouponCode) != "",
+	}
 	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, params, &response, opts...)
 	if err != nil {
 		return nil, err
@@ -462,7 +467,7 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 func validateChargeListParams(params ChargeListParams) error {
 	if params.Status != "" {
 		valid := map[string]struct{}{
-			"created": {}, "pending": {}, "authorized": {}, "paid": {},
+			"created": {}, "pending": {}, "authorized": {}, "under_review": {}, "paid": {},
 			"partially_refunded": {}, "refunded": {}, "failed": {}, "expired": {},
 			"cancelled": {}, "disputed": {}, "chargeback": {},
 		}

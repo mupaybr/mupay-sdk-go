@@ -224,7 +224,7 @@ func (service *RefundsService) ListByCharge(ctx context.Context, chargeID string
 	}
 	expectedLimit := params.Limit
 	if expectedLimit == 0 {
-		expectedLimit = 25
+		expectedLimit = 100
 	}
 	response := refundListResponse{expectedChargeID: chargeID, expectedLimit: expectedLimit}
 	path := "/v1/charges/" + url.PathEscape(chargeID) + "/refunds"
@@ -239,7 +239,10 @@ func validateOpaqueCursor(cursor string) error {
 		return errors.New("mupag: invalid pagination cursor")
 	}
 	for _, character := range []byte(cursor) {
-		if character < 0x21 || character > 0x7e {
+		if (character < 'A' || character > 'Z') &&
+			(character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') &&
+			character != '_' && character != '-' {
 			return errors.New("mupag: invalid pagination cursor")
 		}
 	}

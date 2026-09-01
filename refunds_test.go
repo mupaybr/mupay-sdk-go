@@ -248,7 +248,7 @@ func TestRefundsListByChargeRejectsResponsesBeyondRequestedLimit(t *testing.T) {
 		itemCount int
 		wantError bool
 	}{
-		{name: "default limit", itemCount: 26, wantError: true},
+		{name: "default limit", itemCount: 100},
 		{name: "requested limit", params: mupag.RefundListParams{Limit: 2}, itemCount: 3, wantError: true},
 		{name: "exact requested limit", params: mupag.RefundListParams{Limit: 2}, itemCount: 2},
 		{name: "public maximum", params: mupag.RefundListParams{Limit: 100}, itemCount: 100},

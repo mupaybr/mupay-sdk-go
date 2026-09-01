@@ -203,6 +203,7 @@ func TestChargesListCorrelatesStatusFilter(t *testing.T) {
 		wantError       bool
 	}{
 		{name: "matching status", requestedStatus: "paid", returnedStatus: "paid"},
+		{name: "matching review status", requestedStatus: "under_review", returnedStatus: "under_review"},
 		{name: "different status", requestedStatus: "paid", returnedStatus: "refunded", wantError: true},
 		{name: "no status filter", returnedStatus: "refunded"},
 	}

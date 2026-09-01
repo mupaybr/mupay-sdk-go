@@ -15,17 +15,34 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 		name        string
 		body        string
 		key         string
+		couponCode  string
+		wantAmount  int64
 		wantUnknown bool
 	}{
 		{
-			name: "matching amount",
-			body: `{"charge_id":"charge_1","status":"pending","amount_cents":100}`,
-			key:  "charge-correlation-match",
+			name:       "matching amount",
+			body:       `{"charge_id":"charge_1","status":"pending","amount_cents":100}`,
+			key:        "charge-correlation-match",
+			wantAmount: 100,
 		},
 		{
 			name:        "different amount",
 			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":200}`,
 			key:         "charge-correlation-mismatch",
+			wantUnknown: true,
+		},
+		{
+			name:       "coupon discount and review status",
+			body:       `{"charge_id":"charge_1","status":"under_review","amount_cents":50}`,
+			key:        "charge-correlation-coupon",
+			couponCode: "SAVE50",
+			wantAmount: 50,
+		},
+		{
+			name:        "coupon response exceeds requested amount",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":200}`,
+			key:         "charge-correlation-coupon-increase",
+			couponCode:  "SAVE50",
 			wantUnknown: true,
 		},
 	}
@@ -41,16 +58,18 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 				nil,
 			)
 
+			params := validPixCharge()
+			params.CouponCode = test.couponCode
 			charge, err := client.Charges.Create(
 				context.Background(),
-				validPixCharge(),
+				params,
 				mupag.WithIdempotencyKey(test.key),
 			)
 			assertCorrelationOutcome(t, err, test.key, test.wantUnknown)
 			if test.wantUnknown && charge != nil {
 				t.Fatalf("charge = %#v, want nil for uncorrelated response", charge)
 			}
-			if !test.wantUnknown && (charge == nil || charge.AmountCents != 100) {
+			if !test.wantUnknown && (charge == nil || charge.AmountCents != test.wantAmount) {
 				t.Fatalf("charge = %#v, want matching response", charge)
 			}
 			if attempts != 1 {
