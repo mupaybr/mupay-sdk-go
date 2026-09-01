@@ -77,6 +77,18 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 			key:         "charge-correlation-payment-method-null",
 			wantUnknown: true,
 		},
+		{
+			name:        "invalid optional psp charge id type",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"psp_charge_id":42}`,
+			key:         "charge-correlation-psp-charge-id-type",
+			wantUnknown: true,
+		},
+		{
+			name:        "invalid optional expiration timestamp",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"expires_at":"not-an-instant"}`,
+			key:         "charge-correlation-expiration-format",
+			wantUnknown: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -177,16 +189,24 @@ func TestChargeCreateCorrelatesCustomerEcho(t *testing.T) {
 	}
 }
 
-func TestChargeCreateCorrelatesExternalReferenceEcho(t *testing.T) {
+func TestChargeCreateValidatesGeneratedCustomerAliases(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		echo        string
 		wantUnknown bool
 	}{
-		{name: "matching", echo: `,"external_reference":"order_123"`},
-		{name: "omitted"},
-		{name: "divergent", echo: `,"external_reference":"order_other"`, wantUnknown: true},
-		{name: "null", echo: `,"external_reference":null`, wantUnknown: true},
+		{name: "aliases omitted"},
+		{name: "valid customer_id", echo: `,"customer_id":"cus_created"`},
+		{name: "valid customer.id", echo: `,"customer":{"id":"cus_created"}`},
+		{name: "matching aliases", echo: `,"customer_id":"cus_created","customer":{"id":"cus_created"}`},
+		{name: "conflicting aliases", echo: `,"customer_id":"cus_a","customer":{"id":"cus_b"}`, wantUnknown: true},
+		{name: "null customer_id", echo: `,"customer_id":null`, wantUnknown: true},
+		{name: "numeric customer_id", echo: `,"customer_id":42`, wantUnknown: true},
+		{name: "invalid customer_id", echo: `,"customer_id":".."`, wantUnknown: true},
+		{name: "null customer", echo: `,"customer":null`, wantUnknown: true},
+		{name: "customer without id", echo: `,"customer":{"name":"Ana"}`, wantUnknown: true},
+		{name: "null customer.id", echo: `,"customer":{"id":null}`, wantUnknown: true},
+		{name: "numeric customer.id", echo: `,"customer":{"id":42}`, wantUnknown: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var attempts int
@@ -199,7 +219,56 @@ func TestChargeCreateCorrelatesExternalReferenceEcho(t *testing.T) {
 				nil,
 			)
 			params := validPixCharge()
-			params.ExternalReference = "order_123"
+			params.Customer.ID = ""
+			key := "charge-generated-customer-echo"
+
+			charge, err := client.Charges.Create(
+				context.Background(),
+				params,
+				mupag.WithIdempotencyKey(key),
+			)
+			assertCorrelationOutcome(t, err, key, test.wantUnknown)
+			if test.wantUnknown && charge != nil {
+				t.Fatalf("charge = %#v, want nil for invalid generated customer echo", charge)
+			}
+			if !test.wantUnknown && charge == nil {
+				t.Fatal("valid generated customer echo returned nil charge")
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
+func TestChargeCreateCorrelatesExternalReferenceEcho(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		echo                       string
+		requestedExternalReference string
+		wantUnknown                bool
+	}{
+		{name: "requested matching", echo: `,"external_reference":"order_123"`, requestedExternalReference: "order_123"},
+		{name: "requested echo omitted", requestedExternalReference: "order_123"},
+		{name: "requested divergent", echo: `,"external_reference":"order_other"`, requestedExternalReference: "order_123", wantUnknown: true},
+		{name: "requested null", echo: `,"external_reference":null`, requestedExternalReference: "order_123", wantUnknown: true},
+		{name: "unrequested echo omitted"},
+		{name: "unrequested null", echo: `,"external_reference":null`},
+		{name: "unrequested non-null", echo: `,"external_reference":"order_other"`, wantUnknown: true},
+		{name: "unrequested invalid type", echo: `,"external_reference":42`, wantUnknown: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			body := fmt.Sprintf(`{"charge_id":"charge_1","status":"pending","amount_cents":100%s}`, test.echo)
+			client := testClientWithResults(
+				t,
+				0,
+				[]roundTripResult{{response: jsonHTTPResponse(http.StatusCreated, body)}},
+				&attempts,
+				nil,
+			)
+			params := validPixCharge()
+			params.ExternalReference = test.requestedExternalReference
 			key := "charge-external-reference-echo"
 
 			charge, err := client.Charges.Create(
@@ -264,6 +333,7 @@ func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T
 		body              string
 		key               string
 		externalReference string
+		withoutCustomerID bool
 	}{
 		{
 			name: "divergent coupon",
@@ -301,6 +371,27 @@ func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T
 			key:               "external-reference-divergent-retry-key",
 			externalReference: "order_123",
 		},
+		{
+			name:              "conflicting generated customer aliases",
+			body:              `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"customer_id":"cus_a","customer":{"id":"cus_b"}}`,
+			key:               "generated-customer-aliases-divergent-retry-key",
+			withoutCustomerID: true,
+		},
+		{
+			name: "unrequested external reference",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"external_reference":"order_other"}`,
+			key:  "unrequested-external-reference-retry-key",
+		},
+		{
+			name: "invalid optional psp charge id type",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"psp_charge_id":42}`,
+			key:  "invalid-psp-charge-id-retry-key",
+		},
+		{
+			name: "invalid optional expiration timestamp",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"expires_at":"not-an-instant"}`,
+			key:  "invalid-expires-at-retry-key",
+		},
 	}
 
 	for _, test := range tests {
@@ -320,6 +411,9 @@ func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T
 			params := validPixCharge()
 			params.CouponCode = "SAVE50"
 			params.ExternalReference = test.externalReference
+			if test.withoutCustomerID {
+				params.Customer.ID = ""
+			}
 
 			charge, err := client.Charges.Create(
 				context.Background(),
@@ -551,6 +645,67 @@ func TestSubscriptionCancelAcceptsEveryModeCompatibleResponse(t *testing.T) {
 			}
 			if attempts != 1 {
 				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
+func TestSubscriptionCancelCorrelatesCancellationReasonEcho(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		reason         string
+		echo           string
+		afterAmbiguous bool
+		wantUnknown    bool
+	}{
+		{name: "requested matching", reason: "customer_request", echo: `,"cancellation_reason":"customer_request"`},
+		{name: "requested echo omitted", reason: "customer_request"},
+		{name: "requested null", reason: "customer_request", echo: `,"cancellation_reason":null`, wantUnknown: true},
+		{name: "requested divergent", reason: "customer_request", echo: `,"cancellation_reason":"other_reason"`, wantUnknown: true},
+		{name: "requested invalid type", reason: "customer_request", echo: `,"cancellation_reason":42`, wantUnknown: true},
+		{name: "unrequested echo omitted"},
+		{name: "unrequested null", echo: `,"cancellation_reason":null`},
+		{name: "unrequested non-null", echo: `,"cancellation_reason":"other_reason"`, wantUnknown: true},
+		{name: "matching after ambiguity", reason: "customer_request", echo: `,"cancellation_reason":"customer_request"`, afterAmbiguous: true},
+		{name: "divergent after ambiguity", reason: "customer_request", echo: `,"cancellation_reason":"other_reason"`, afterAmbiguous: true, wantUnknown: true},
+		{name: "unrequested non-null after ambiguity", echo: `,"cancellation_reason":"other_reason"`, afterAmbiguous: true, wantUnknown: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			results := []roundTripResult{{response: jsonHTTPResponse(
+				http.StatusOK,
+				fmt.Sprintf(`{"id":"subscription_1","status":"canceled","cancel_at_period_end":false%s}`, test.echo),
+			)}}
+			maxRetries := 0
+			if test.afterAmbiguous {
+				maxRetries = 1
+				results = append(
+					[]roundTripResult{{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)}},
+					results...,
+				)
+			}
+			client := testClientWithResults(t, maxRetries, results, &attempts, nil)
+			key := "subscription-cancellation-reason-echo"
+
+			subscription, err := client.Subscriptions.Cancel(
+				context.Background(),
+				"subscription_1",
+				mupag.CancelSubscriptionParams{Mode: "immediate", Reason: test.reason},
+				mupag.WithIdempotencyKey(key),
+			)
+			assertCorrelationOutcome(t, err, key, test.wantUnknown)
+			if test.wantUnknown && subscription != nil {
+				t.Fatalf("subscription = %#v, want nil for uncorrelated cancellation reason", subscription)
+			}
+			if !test.wantUnknown && subscription == nil {
+				t.Fatal("compatible cancellation reason returned nil subscription")
+			}
+			wantAttempts := 1
+			if test.afterAmbiguous {
+				wantAttempts = 2
+			}
+			if attempts != wantAttempts {
+				t.Fatalf("attempts = %d, want %d", attempts, wantAttempts)
 			}
 		})
 	}

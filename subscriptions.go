@@ -34,14 +34,17 @@ type subscriptionCancelResponse struct {
 	Subscription
 	expectedID               string
 	expectedMode             string
+	expectedReason           string
 	cancelAtPeriodEndPresent bool
+	cancellationReason       json.RawMessage
 }
 
 func (response *subscriptionCancelResponse) UnmarshalJSON(payload []byte) error {
 	var decoded struct {
-		ID                string `json:"id"`
-		Status            string `json:"status"`
-		CancelAtPeriodEnd *bool  `json:"cancel_at_period_end"`
+		ID                 string          `json:"id"`
+		Status             string          `json:"status"`
+		CancelAtPeriodEnd  *bool           `json:"cancel_at_period_end"`
+		CancellationReason json.RawMessage `json:"cancellation_reason"`
 	}
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return err
@@ -49,6 +52,7 @@ func (response *subscriptionCancelResponse) UnmarshalJSON(payload []byte) error 
 
 	response.Subscription = Subscription{ID: decoded.ID, Status: decoded.Status}
 	response.cancelAtPeriodEndPresent = decoded.CancelAtPeriodEnd != nil
+	response.cancellationReason = decoded.CancellationReason
 	if decoded.CancelAtPeriodEnd != nil {
 		response.CancelAtPeriodEnd = *decoded.CancelAtPeriodEnd
 	}
@@ -64,6 +68,9 @@ func (response *subscriptionCancelResponse) validateResponse() error {
 	}
 	if !response.cancelAtPeriodEndPresent {
 		return errors.New("mupag: API returned a subscription without cancel_at_period_end")
+	}
+	if !rawOptionalStringEchoMatches(response.cancellationReason, response.expectedReason) {
+		return errors.New("mupag: API returned a subscription cancellation reason that does not match the request")
 	}
 	switch response.expectedMode {
 	case "immediate":
@@ -109,7 +116,7 @@ func (service *SubscriptionsService) Cancel(ctx context.Context, id string, para
 	if containsPANLikeSequence(params.Reason) {
 		return nil, errors.New("mupag: subscription cancel reason cannot contain a payment card number")
 	}
-	response := subscriptionCancelResponse{expectedID: id, expectedMode: params.Mode}
+	response := subscriptionCancelResponse{expectedID: id, expectedMode: params.Mode, expectedReason: params.Reason}
 	path := "/v1/subscriptions/" + url.PathEscape(id) + "/cancel"
 	err := service.client.do(ctx, http.MethodPost, path, nil, params, &response, opts...)
 	if err != nil {

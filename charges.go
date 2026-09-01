@@ -133,9 +133,7 @@ func (response *chargeCreateResponse) validateResponse() error {
 	if hasDivergentCustomerEcho(response.expectedCustomerID, response.CustomerID, response.Customer) {
 		return errors.New("mupag: API returned a charge customer that does not match the request")
 	}
-	if response.expectedExternalRef != "" &&
-		response.ExternalReference != nil &&
-		!rawStringEquals(response.ExternalReference, response.expectedExternalRef) {
+	if !rawOptionalStringEchoMatches(response.ExternalReference, response.expectedExternalRef) {
 		return errors.New("mupag: API returned a charge external reference that does not match the request")
 	}
 	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
@@ -172,26 +170,57 @@ func (response *chargeCreateResponse) validateCouponEcho() error {
 }
 
 func hasDivergentCustomerEcho(expected string, customerID, customer json.RawMessage) bool {
-	if expected == "" {
-		return false
+	identities := make([]string, 0, 2)
+	if customerID != nil {
+		identity, valid := rawResourceIDEcho(customerID)
+		if !valid {
+			return true
+		}
+		identities = append(identities, identity)
 	}
-	if customerID != nil && !rawStringEquals(customerID, expected) {
-		return true
+	if customer != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(customer, &fields); err != nil || fields == nil {
+			return true
+		}
+		nestedID, present := fields["id"]
+		if !present {
+			return true
+		}
+		identity, valid := rawResourceIDEcho(nestedID)
+		if !valid {
+			return true
+		}
+		identities = append(identities, identity)
 	}
-	if customer == nil {
-		return false
+	for _, identity := range identities {
+		if identity != identities[0] || expected != "" && identity != expected {
+			return true
+		}
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(customer, &fields); err != nil {
-		return true
-	}
-	nestedID, present := fields["id"]
-	return present && !rawStringEquals(nestedID, expected)
+	return false
 }
 
-func rawStringEquals(raw json.RawMessage, expected string) bool {
+func rawResourceIDEcho(raw json.RawMessage) (string, bool) {
 	var actual *string
-	return json.Unmarshal(raw, &actual) == nil && actual != nil && *actual == expected
+	if json.Unmarshal(raw, &actual) != nil || actual == nil || !validResourceID(*actual) {
+		return "", false
+	}
+	return *actual, true
+}
+
+func rawOptionalStringEchoMatches(raw json.RawMessage, expected string) bool {
+	if raw == nil {
+		return true
+	}
+	var actual *string
+	if json.Unmarshal(raw, &actual) != nil {
+		return false
+	}
+	if actual == nil {
+		return expected == ""
+	}
+	return expected != "" && *actual == expected
 }
 
 func (response *chargeCreateResponse) validateResponseAfterAmbiguousRetry() error {
