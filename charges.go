@@ -266,13 +266,10 @@ func (response *chargeListResponse) validateResponse() error {
 		item := &(*response.Data)[index]
 		if item.PaymentMethod != nil {
 			var actual *string
-			if err := json.Unmarshal(item.PaymentMethod, &actual); err != nil {
+			if err := json.Unmarshal(item.PaymentMethod, &actual); err != nil || actual == nil || *actual == "" {
 				return errors.New("mupag: API returned an invalid charge payment method")
 			}
-			item.Charge.PaymentMethod = ""
-			if actual != nil {
-				item.Charge.PaymentMethod = *actual
-			}
+			item.Charge.PaymentMethod = *actual
 		}
 		if hasDivergentCustomerEcho(response.expectedCustomerID, item.CustomerID, item.Customer) {
 			return errors.New("mupag: API returned a charge outside the requested customer")
@@ -420,7 +417,9 @@ func validateChargeCreateParams(params ChargeCreateParams, metadataSnapshot *jso
 		return errors.New("mupag: card fields are not allowed for pix")
 	}
 	if params.IsMIT {
-		if !hasStoredToken || hasRawToken || !validResourceID(params.InitialMITReferenceID) {
+		if !hasStoredToken || hasRawToken ||
+			!validResourceID(params.InitialMITReferenceID) ||
+			containsPANLikeSequence(params.InitialMITReferenceID) {
 			return errors.New("mupag: MIT requires card_token_id and initial_mit_reference_id without raw card_token")
 		}
 	} else if params.InitialMITReferenceID != "" {

@@ -368,6 +368,23 @@ func TestChargesListRejectsExplicitlyInvalidPaymentMethodForFilter(t *testing.T)
 	}
 }
 
+func TestChargesListRejectsExplicitlyEmptyPaymentMethodWithoutFilter(t *testing.T) {
+	for _, paymentMethod := range []string{`null`, `""`} {
+		t.Run(paymentMethod, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				body := fmt.Sprintf(`{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":%s,"created_at":"2026-08-31T12:00:00Z"}]}`, paymentMethod)
+				writeJSON(writer, http.StatusOK, body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{})
+			if err == nil || page != nil {
+				t.Fatalf("page = %#v, err = %v, want explicit empty payment method error", page, err)
+			}
+		})
+	}
+}
+
 func TestChargesListReturnsMatchingPaymentMethod(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":"pix","created_at":"2026-08-31T12:00:00Z"}]}`)

@@ -432,6 +432,31 @@ func TestChargeCreateRejectsPANInCardTokenFieldsBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestChargeCreateRejectsPANInMITReferenceBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	params := validPixCharge()
+	params.PaymentMethod = "credit_card"
+	params.PayerIP = "203.0.113.10"
+	params.CardTokenID = "tok_stored_123"
+	params.IsMIT = true
+	params.InitialMITReferenceID = "4111111111111111"
+
+	if _, err := client.Charges.Create(context.Background(), params); err == nil {
+		t.Fatal("PAN-like initial MIT reference was accepted")
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
 func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
