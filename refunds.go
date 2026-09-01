@@ -3,6 +3,7 @@ package mupag
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -72,7 +73,24 @@ type refundCreateResponse struct {
 	expectedAmountCents int64
 	expectedReason      string
 	correlateAmount     bool
-	correlateReason     bool
+	reason              json.RawMessage
+}
+
+func (response *refundCreateResponse) UnmarshalJSON(payload []byte) error {
+	type refundPayload Refund
+	var decoded refundPayload
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return err
+	}
+	var echoes struct {
+		Reason json.RawMessage `json:"reason"`
+	}
+	if err := json.Unmarshal(payload, &echoes); err != nil {
+		return err
+	}
+	response.Refund = Refund(decoded)
+	response.reason = echoes.Reason
+	return nil
 }
 
 func (response *refundCreateResponse) validateResponse() error {
@@ -85,10 +103,24 @@ func (response *refundCreateResponse) validateResponse() error {
 	if response.correlateAmount && response.AmountCents != response.expectedAmountCents {
 		return errors.New("mupag: API returned a refund amount that does not match the request")
 	}
-	if response.correlateReason && response.Reason != response.expectedReason {
+	if !refundReasonEchoMatches(response.reason, response.expectedReason) {
 		return errors.New("mupag: API returned a refund reason that does not match the request")
 	}
 	return nil
+}
+
+func refundReasonEchoMatches(raw json.RawMessage, expected string) bool {
+	if raw == nil {
+		return expected == ""
+	}
+	var actual *string
+	if json.Unmarshal(raw, &actual) != nil {
+		return false
+	}
+	if actual == nil {
+		return expected == ""
+	}
+	return expected != "" && *actual == expected
 }
 
 func (response *refundCreateResponse) validateResponseAfterAmbiguousRetry() error {
@@ -204,7 +236,6 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 		expectedChargeID: chargeID,
 		correlateAmount:  hasAmount,
 		expectedReason:   params.Reason,
-		correlateReason:  params.Reason != "",
 	}
 	if hasAmount {
 		response.expectedAmountCents = *params.AmountCents

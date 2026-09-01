@@ -530,6 +530,11 @@ func validateMetadata(metadata map[string]any) (json.RawMessage, error) {
 		switch value := current.value.(type) {
 		case map[string]any:
 			for key, child := range value {
+				if strings.IndexFunc(key, func(character rune) bool {
+					return character > unicode.MaxASCII
+				}) != -1 {
+					return nil, errors.New("mupag: metadata contains forbidden sensitive field")
+				}
 				normalized := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(key))
 				switch normalized {
 				case "__proto__", "prototype", "constructor":

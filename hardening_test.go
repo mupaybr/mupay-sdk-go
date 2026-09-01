@@ -299,6 +299,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv2", "cvc2", "cardCvv", "cardSecurityCode", "cardVerificationCode",
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
+		"ｃｖｖ", "cardｃｖｖ",
 		"cardVerificationNumber", "securityValue", "cardIdentificationNumber",
 		"csc", "cid", "csc2", "cid3",
 		"cav2", "cardCav2", "cav2_value", "cardCav2Code",

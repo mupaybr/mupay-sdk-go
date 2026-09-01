@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	mupag "github.com/mupaybr/mupag-sdk-go"
@@ -514,6 +515,58 @@ func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 			}
 			if attempts != 1 {
 				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
+func TestRefundCreateCorrelatesOmittedReasonEcho(t *testing.T) {
+	amount := int64(100)
+	for _, test := range []struct {
+		name           string
+		reasonField    string
+		afterAmbiguous bool
+		wantUnknown    bool
+	}{
+		{name: "absent reason direct"},
+		{name: "null reason direct", reasonField: `,"reason":null`},
+		{name: "unexpected reason direct", reasonField: `,"reason":"duplicate"`, wantUnknown: true},
+		{name: "unexpected empty reason direct", reasonField: `,"reason":""`, wantUnknown: true},
+		{name: "absent reason after ambiguity", afterAmbiguous: true},
+		{name: "null reason after ambiguity", reasonField: `,"reason":null`, afterAmbiguous: true},
+		{name: "unexpected reason after ambiguity", reasonField: `,"reason":"duplicate"`, afterAmbiguous: true, wantUnknown: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested"` + test.reasonField + `,"requested_at":"2026-08-31T12:00:00Z"}`
+			results := []roundTripResult{{response: jsonHTTPResponse(http.StatusAccepted, body)}}
+			maxRetries := 0
+			if test.afterAmbiguous {
+				maxRetries = 1
+				results = append(
+					[]roundTripResult{{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)}},
+					results...,
+				)
+			}
+			attempts := 0
+			key := "refund-omitted-reason-" + strings.ReplaceAll(test.name, " ", "-")
+			client := testClientWithResults(t, maxRetries, results, &attempts, nil)
+
+			refund, err := client.Refunds.Create(
+				context.Background(),
+				"charge_1",
+				mupag.RefundCreateParams{AmountCents: &amount},
+				mupag.WithIdempotencyKey(key),
+			)
+
+			assertCorrelationOutcome(t, err, key, test.wantUnknown)
+			if test.wantUnknown && refund != nil {
+				t.Fatalf("refund = %#v, want nil", refund)
+			}
+			if !test.wantUnknown && refund == nil {
+				t.Fatal("matching omitted reason response returned nil refund")
+			}
+			if attempts != len(results) {
+				t.Fatalf("attempts = %d, want %d", attempts, len(results))
 			}
 		})
 	}
