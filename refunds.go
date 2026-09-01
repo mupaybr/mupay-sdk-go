@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -189,6 +190,9 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 	if hasAmount && (*params.AmountCents < 1 || *params.AmountCents > maxMoneyCents) {
 		return nil, errors.New("mupag: invalid refund amount")
 	}
+	params.Reason = strings.TrimFunc(params.Reason, func(character rune) bool {
+		return character <= ' '
+	})
 	if len(params.Reason) > 500 {
 		return nil, errors.New("mupag: refund reason exceeds 500 bytes")
 	}

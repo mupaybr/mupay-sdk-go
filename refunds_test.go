@@ -58,7 +58,7 @@ func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 	refund, err := client.Refunds.Create(
 		context.Background(),
 		"charge_1",
-		mupag.RefundCreateParams{Full: true, Reason: "requested_by_customer"},
+		mupag.RefundCreateParams{Full: true, Reason: "  requested_by_customer\t"},
 		mupag.WithIdempotencyKey("refund_order_1"),
 	)
 	if err != nil {
@@ -69,6 +69,30 @@ func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 	}
 	if refund.RefundID != "refund_1" || refund.Status != "requested" {
 		t.Fatalf("refund = %+v", refund)
+	}
+}
+
+func TestRefundsCreateOmitsWhitespaceOnlyReason(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		writeJSON(writer, http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`)
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(server.URL).Refunds.Create(
+		context.Background(),
+		"charge_1",
+		mupag.RefundCreateParams{Full: true, Reason: " \t\r\n "},
+		mupag.WithIdempotencyKey("refund_order_whitespace"),
+	)
+	if err != nil {
+		t.Fatalf("create refund: %v", err)
+	}
+	if _, present := body["reason"]; present {
+		t.Fatalf("whitespace-only reason was sent: %#v", body["reason"])
 	}
 }
 
