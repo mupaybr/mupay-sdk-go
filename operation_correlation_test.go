@@ -3,6 +3,7 @@ package mupag_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -149,12 +150,12 @@ func TestSubscriptionCancelCorrelatesResponseID(t *testing.T) {
 	}{
 		{
 			name: "matching subscription",
-			body: `{"id":"subscription_1","status":"canceled"}`,
+			body: `{"id":"subscription_1","status":"canceled","cancel_at_period_end":false}`,
 			key:  "subscription-cancel-match",
 		},
 		{
 			name:        "different subscription",
-			body:        `{"id":"subscription_2","status":"canceled"}`,
+			body:        `{"id":"subscription_2","status":"canceled","cancel_at_period_end":false}`,
 			key:         "subscription-cancel-mismatch",
 			wantUnknown: true,
 		},
@@ -183,6 +184,101 @@ func TestSubscriptionCancelCorrelatesResponseID(t *testing.T) {
 			}
 			if !test.wantUnknown && (subscription == nil || subscription.ID != "subscription_1") {
 				t.Fatalf("subscription = %#v, want matching response", subscription)
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
+func TestSubscriptionCancelAcceptsEveryModeCompatibleResponse(t *testing.T) {
+	tests := []struct {
+		name              string
+		mode              string
+		status            string
+		cancelAtPeriodEnd bool
+	}{
+		{name: "immediate final cancellation", mode: "immediate", status: "canceled"},
+		{name: "scheduled from trialing", mode: "end_of_period", status: "trialing", cancelAtPeriodEnd: true},
+		{name: "scheduled from active", mode: "end_of_period", status: "active", cancelAtPeriodEnd: true},
+		{name: "scheduled from past due", mode: "end_of_period", status: "past_due", cancelAtPeriodEnd: true},
+		{name: "scheduled from unpaid", mode: "end_of_period", status: "unpaid", cancelAtPeriodEnd: true},
+		{name: "scheduled from paused", mode: "end_of_period", status: "paused", cancelAtPeriodEnd: true},
+		{name: "scheduled from incomplete", mode: "end_of_period", status: "incomplete", cancelAtPeriodEnd: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			body := fmt.Sprintf(
+				`{"id":"subscription_1","status":%q,"cancel_at_period_end":%t}`,
+				test.status,
+				test.cancelAtPeriodEnd,
+			)
+			client := testClientWithResults(
+				t,
+				0,
+				[]roundTripResult{{response: jsonHTTPResponse(http.StatusOK, body)}},
+				&attempts,
+				nil,
+			)
+
+			subscription, err := client.Subscriptions.Cancel(
+				context.Background(),
+				"subscription_1",
+				mupag.CancelSubscriptionParams{Mode: test.mode},
+				mupag.WithIdempotencyKey("subscription-mode-compatible"),
+			)
+			if err != nil {
+				t.Fatalf("compatible response returned error: %v", err)
+			}
+			if subscription == nil || subscription.Status != test.status || subscription.CancelAtPeriodEnd != test.cancelAtPeriodEnd {
+				t.Fatalf("subscription = %#v, want status=%q cancel_at_period_end=%t", subscription, test.status, test.cancelAtPeriodEnd)
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
+func TestSubscriptionCancelTreatsModeIncompatibleResponseAsOutcomeUnknown(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		body string
+	}{
+		{name: "immediate non-final status", mode: "immediate", body: `{"id":"subscription_1","status":"active","cancel_at_period_end":false}`},
+		{name: "immediate scheduled marker", mode: "immediate", body: `{"id":"subscription_1","status":"canceled","cancel_at_period_end":true}`},
+		{name: "immediate missing marker", mode: "immediate", body: `{"id":"subscription_1","status":"canceled"}`},
+		{name: "scheduled terminal status", mode: "end_of_period", body: `{"id":"subscription_1","status":"canceled","cancel_at_period_end":true}`},
+		{name: "scheduled unsupported status", mode: "end_of_period", body: `{"id":"subscription_1","status":"mystery","cancel_at_period_end":true}`},
+		{name: "scheduled false marker", mode: "end_of_period", body: `{"id":"subscription_1","status":"active","cancel_at_period_end":false}`},
+		{name: "scheduled missing marker", mode: "end_of_period", body: `{"id":"subscription_1","status":"active"}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			client := testClientWithResults(
+				t,
+				0,
+				[]roundTripResult{{response: jsonHTTPResponse(http.StatusOK, test.body)}},
+				&attempts,
+				nil,
+			)
+			key := "subscription-mode-contract"
+
+			subscription, err := client.Subscriptions.Cancel(
+				context.Background(),
+				"subscription_1",
+				mupag.CancelSubscriptionParams{Mode: test.mode},
+				mupag.WithIdempotencyKey(key),
+			)
+			assertCorrelationOutcome(t, err, key, true)
+			if subscription != nil {
+				t.Fatalf("subscription = %#v, want nil for mode-incompatible response", subscription)
 			}
 			if attempts != 1 {
 				t.Fatalf("attempts = %d, want 1", attempts)

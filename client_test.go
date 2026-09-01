@@ -145,6 +145,126 @@ func TestChargeCreateAcceptsMoneyBoundaryAmounts(t *testing.T) {
 	}
 }
 
+func TestChargeCreateValidatesAggregateSplitAllocation(t *testing.T) {
+	const maximumAmountCents int64 = 9_000_000_000_000_000
+	tests := []struct {
+		name        string
+		amountCents int64
+		rules       []mupag.SplitRuleParams
+		wantError   bool
+	}{
+		{
+			name:        "fixed only exact boundary",
+			amountCents: 1_000,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: 400},
+				{RecipientID: "recipient_2", ValueType: "fixed_amount", ValueCents: 600},
+			},
+		},
+		{
+			name:        "fixed only above charge",
+			amountCents: 1_000,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: 400},
+				{RecipientID: "recipient_2", ValueType: "fixed_amount", ValueCents: 601},
+			},
+			wantError: true,
+		},
+		{
+			name:        "percentage only exact boundary",
+			amountCents: 1_000,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "percentage_of_gross", ValueBPS: 4_000},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 6_000},
+			},
+		},
+		{
+			name:        "percentage only above one hundred percent",
+			amountCents: 1_000,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "percentage_of_gross", ValueBPS: 4_000},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 6_001},
+			},
+			wantError: true,
+		},
+		{
+			name:        "mixed exact rounded boundary",
+			amountCents: 1_001,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: 501},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 5_000},
+			},
+		},
+		{
+			name:        "mixed above charge",
+			amountCents: 1_001,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: 502},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 5_000},
+			},
+			wantError: true,
+		},
+		{
+			name:        "maximum monetary exact boundary without overflow",
+			amountCents: maximumAmountCents,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: maximumAmountCents / 2},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 5_000},
+			},
+		},
+		{
+			name:        "maximum monetary above charge without overflow",
+			amountCents: maximumAmountCents,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "recipient_1", ValueType: "fixed_amount", ValueCents: maximumAmountCents/2 + 1},
+				{RecipientID: "recipient_2", ValueType: "percentage_of_gross", ValueBPS: 5_000},
+			},
+			wantError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			client := mupag.NewClient(
+				mupag.WithAPIKey("sk_test_123"),
+				mupag.WithTestEnvironment(),
+				mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+				mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					requests++
+					return jsonHTTPResponse(http.StatusCreated, fmt.Sprintf(
+						`{"charge_id":"charge_1","status":"pending","amount_cents":%d}`,
+						test.amountCents,
+					)), nil
+				})}),
+			)
+
+			params := validPixCharge()
+			params.AmountCents = test.amountCents
+			params.SplitRules = test.rules
+			charge, err := client.Charges.Create(context.Background(), params)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("aggregate split was accepted: %#v", charge)
+				}
+				if requests != 0 {
+					t.Fatalf("network requests = %d, want 0", requests)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("valid aggregate split returned error: %v", err)
+			}
+			if charge == nil || charge.AmountCents != test.amountCents {
+				t.Fatalf("charge = %#v, want amount %d", charge, test.amountCents)
+			}
+			if requests != 1 {
+				t.Fatalf("network requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
 func TestCardChargeForwardsLiteralPayerIPAndSingleInstallment(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +375,7 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		writeJSON(w, http.StatusOK, `{"id":"sub_123","status":"canceled"}`)
+		writeJSON(w, http.StatusOK, `{"id":"sub_123","status":"canceled","cancel_at_period_end":false}`)
 	}))
 	defer server.Close()
 

@@ -2,6 +2,7 @@ package mupag
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -14,8 +15,9 @@ type SubscriptionsService struct {
 
 // Subscription representa o estado resumido de uma assinatura.
 type Subscription struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	ID                string `json:"id"`
+	Status            string `json:"status"`
+	CancelAtPeriodEnd bool   `json:"cancel_at_period_end"`
 }
 
 func (subscription *Subscription) validateResponse() error {
@@ -30,7 +32,27 @@ func (subscription *Subscription) validateResponse() error {
 
 type subscriptionCancelResponse struct {
 	Subscription
-	expectedID string
+	expectedID               string
+	expectedMode             string
+	cancelAtPeriodEndPresent bool
+}
+
+func (response *subscriptionCancelResponse) UnmarshalJSON(payload []byte) error {
+	var decoded struct {
+		ID                string `json:"id"`
+		Status            string `json:"status"`
+		CancelAtPeriodEnd *bool  `json:"cancel_at_period_end"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return err
+	}
+
+	response.Subscription = Subscription{ID: decoded.ID, Status: decoded.Status}
+	response.cancelAtPeriodEndPresent = decoded.CancelAtPeriodEnd != nil
+	if decoded.CancelAtPeriodEnd != nil {
+		response.CancelAtPeriodEnd = *decoded.CancelAtPeriodEnd
+	}
+	return nil
 }
 
 func (response *subscriptionCancelResponse) validateResponse() error {
@@ -40,7 +62,31 @@ func (response *subscriptionCancelResponse) validateResponse() error {
 	if response.ID != response.expectedID {
 		return errors.New("mupag: API returned a different subscription")
 	}
+	if !response.cancelAtPeriodEndPresent {
+		return errors.New("mupag: API returned a subscription without cancel_at_period_end")
+	}
+	switch response.expectedMode {
+	case "immediate":
+		if response.Status != "canceled" || response.CancelAtPeriodEnd {
+			return errors.New("mupag: API returned a subscription incompatible with immediate cancellation")
+		}
+	case "end_of_period":
+		if !scheduledCancelStatus(response.Status) || !response.CancelAtPeriodEnd {
+			return errors.New("mupag: API returned a subscription incompatible with end-of-period cancellation")
+		}
+	default:
+		return errors.New("mupag: API returned a subscription for an unknown cancellation mode")
+	}
 	return nil
+}
+
+func scheduledCancelStatus(status string) bool {
+	switch status {
+	case "trialing", "active", "past_due", "unpaid", "paused", "incomplete":
+		return true
+	default:
+		return false
+	}
 }
 
 // CancelSubscriptionParams reflete o corpo exigido pelo endpoint real de cancelamento.
@@ -60,7 +106,7 @@ func (service *SubscriptionsService) Cancel(ctx context.Context, id string, para
 	if len(params.Reason) > 500 {
 		return nil, errors.New("mupag: subscription cancel reason exceeds 500 bytes")
 	}
-	response := subscriptionCancelResponse{expectedID: id}
+	response := subscriptionCancelResponse{expectedID: id, expectedMode: params.Mode}
 	path := "/v1/subscriptions/" + url.PathEscape(id) + "/cancel"
 	err := service.client.do(ctx, http.MethodPost, path, nil, params, &response, opts...)
 	if err != nil {

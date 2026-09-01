@@ -68,3 +68,18 @@ func TestReadmeMigrationConfiguresProductionAndSandboxExplicitly(t *testing.T) {
 		t.Fatal("migration section does not document the sandbox/test environment")
 	}
 }
+
+func TestCreateChargeExampleDocumentsStableIdempotencyKey(t *testing.T) {
+	example, err := os.ReadFile(filepath.Join("examples", "create_charge", "main.go"))
+	if err != nil {
+		t.Fatalf("read create charge example: %v", err)
+	}
+
+	contents := string(example)
+	if !strings.Contains(contents, `mupag.WithIdempotencyKey("order_123_charge")`) {
+		t.Fatal("create charge example does not use a stable business idempotency key")
+	}
+	if !strings.Contains(contents, "mesma chave em retries da mesma cobrança") {
+		t.Fatal("create charge example does not explain why the idempotency key must be reused")
+	}
+}

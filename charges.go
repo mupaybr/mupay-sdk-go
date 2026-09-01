@@ -279,24 +279,44 @@ func validateSplitRules(rules []SplitRuleParams, amountCents int64) error {
 	if len(rules) > 50 {
 		return errors.New("mupag: split_rules supports at most 50 entries")
 	}
+	allocatedCents := int64(0)
+	totalBPS := 0
 	for _, rule := range rules {
 		if !validResourceID(rule.RecipientID) {
 			return errors.New("mupag: invalid split recipient_id")
 		}
+		var ruleCents int64
 		switch rule.ValueType {
 		case "fixed_amount":
 			if rule.ValueCents <= 0 || rule.ValueCents > amountCents || rule.ValueBPS != 0 {
 				return errors.New("mupag: fixed_amount split requires only value_cents")
 			}
+			ruleCents = rule.ValueCents
 		case "percentage_of_gross":
 			if rule.ValueBPS <= 0 || rule.ValueBPS > 10_000 || rule.ValueCents != 0 {
 				return errors.New("mupag: percentage split requires only value_bps between 1 and 10000")
 			}
+			if totalBPS > 10_000-rule.ValueBPS {
+				return errors.New("mupag: aggregate split allocation exceeds charge amount or 100 percent")
+			}
+			totalBPS += rule.ValueBPS
+			ruleCents = splitPercentageCents(amountCents, rule.ValueBPS)
 		default:
 			return errors.New("mupag: invalid split value_type")
 		}
+		if allocatedCents > amountCents-ruleCents {
+			return errors.New("mupag: aggregate split allocation exceeds charge amount or 100 percent")
+		}
+		allocatedCents += ruleCents
 	}
 	return nil
+}
+
+func splitPercentageCents(amountCents int64, valueBPS int) int64 {
+	bps := int64(valueBPS)
+	// Dividing first preserves the backend's round-down rule without overflowing
+	// at the maximum supported monetary amount.
+	return amountCents/10_000*bps + amountCents%10_000*bps/10_000
 }
 
 func validateMetadata(metadata map[string]any) error {
