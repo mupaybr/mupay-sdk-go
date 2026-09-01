@@ -380,8 +380,7 @@ func validateMetadata(metadata map[string]any) error {
 					}
 					return -1
 				}, strings.ToLower(key))
-				switch compact {
-				case "pan", "cvv", "cvc", "cardnumber", "securitycode":
+				if isForbiddenSensitiveMetadataKey(compact) {
 					return errors.New("mupag: metadata contains forbidden sensitive field")
 				}
 				stack = append(stack, struct {
@@ -409,6 +408,20 @@ func validateMetadata(metadata map[string]any) error {
 	return nil
 }
 
+func isForbiddenSensitiveMetadataKey(compact string) bool {
+	switch compact {
+	case "pan", "cardnumber":
+		return true
+	}
+
+	base := strings.TrimRight(compact, "0123456789")
+	return strings.HasSuffix(base, "cvv") ||
+		strings.HasSuffix(base, "cvc") ||
+		strings.HasSuffix(base, "securitycode") ||
+		strings.HasSuffix(base, "verificationcode") ||
+		strings.HasSuffix(base, "verificationvalue")
+}
+
 func containsPANLikeSequence(value string) bool {
 	digits := make([]byte, 0, 19)
 	for _, character := range value {
@@ -424,7 +437,7 @@ func containsPANLikeSequence(value string) bool {
 					return true
 				}
 			}
-		case unicode.IsSpace(character) || unicode.IsPunct(character):
+		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character):
 			continue
 		default:
 			digits = digits[:0]

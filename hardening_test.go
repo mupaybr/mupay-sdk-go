@@ -259,6 +259,32 @@ func TestChargeCreateRejectsUnsafeOrAmbiguousPayloadsBeforeNetwork(t *testing.T)
 	}
 }
 
+func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+
+	for _, key := range []string{"cvv2", "cvc2", "cardCvv", "cardSecurityCode", "cardVerificationCode"} {
+		t.Run(key, func(t *testing.T) {
+			params := validPixCharge()
+			params.Metadata = map[string]any{key: "123"}
+			if _, err := client.Charges.Create(context.Background(), params); err == nil {
+				t.Fatalf("sensitive metadata key %q was accepted", key)
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
 func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
@@ -281,6 +307,18 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 		{
 			name:     "JSON string with punctuation separators",
 			metadata: map[string]any{"note": "4111.1111/1111_1111"},
+		},
+		{
+			name:     "JSON string with plus separators",
+			metadata: map[string]any{"note": "4111+1111+1111+1111"},
+		},
+		{
+			name:     "JSON string with equals separators",
+			metadata: map[string]any{"note": "4111=1111=1111=1111"},
+		},
+		{
+			name:     "JSON string with pipe separators",
+			metadata: map[string]any{"note": "4111|1111|1111|1111"},
 		},
 		{
 			name:     "formatted PAN after unrelated numeric metadata",
