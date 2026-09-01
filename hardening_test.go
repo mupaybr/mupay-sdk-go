@@ -279,6 +279,10 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 			metadata: map[string]any{"note": "4111 1111-1111 1111"},
 		},
 		{
+			name:     "JSON string with punctuation separators",
+			metadata: map[string]any{"note": "4111.1111/1111_1111"},
+		},
+		{
 			name: "nested value",
 			metadata: map[string]any{
 				"order": []any{map[string]any{"note": "card 4111-1111-1111-1111"}},

@@ -266,7 +266,11 @@ func (client *Client) doOnce(ctx context.Context, method, path string, query url
 		responseErr := decodeAPIError(response.StatusCode, response.Header, responseBody)
 		if response.StatusCode == http.StatusConflict {
 			var apiErr *APIError
-			if !AsAPIError(responseErr, &apiErr) || strings.TrimSpace(apiErr.Code) == "" || apiErr.Code == "http_409" {
+			if !AsAPIError(responseErr, &apiErr) {
+				return &unreadableConflictError{cause: responseErr}
+			}
+			canonicalCode := strings.TrimSpace(apiErr.Code)
+			if canonicalCode == "" || canonicalCode != apiErr.Code || canonicalCode == "http_409" {
 				return &unreadableConflictError{cause: responseErr}
 			}
 		}

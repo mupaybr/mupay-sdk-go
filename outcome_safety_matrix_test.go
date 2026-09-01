@@ -182,6 +182,8 @@ func TestMutationReadableConflictRequiresUsableCode(t *testing.T) {
 		{name: "missing code", body: `{}`, wantUnknown: true},
 		{name: "empty code", body: `{"code":""}`, wantUnknown: true},
 		{name: "whitespace code", body: `{"code":"   "}`, wantUnknown: true},
+		{name: "padded outcome unknown code", body: `{"code":" idempotency_outcome_unknown "}`, wantUnknown: true},
+		{name: "padded fingerprint conflict code", body: `{"code":" fingerprint_conflict "}`, wantUnknown: true},
 		{name: "fallback code", body: `{"code":"http_409"}`, wantUnknown: true},
 		{name: "recognized fingerprint conflict", body: `{"code":"fingerprint_conflict"}`, wantCode: "fingerprint_conflict"},
 	}

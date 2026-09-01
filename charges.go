@@ -426,7 +426,7 @@ func containsPANLikeSequence(value string) bool {
 			} else {
 				tooLong = true
 			}
-		case character == '-' || unicode.IsSpace(character):
+		case unicode.IsSpace(character) || unicode.IsPunct(character):
 			continue
 		default:
 			if flush() {
