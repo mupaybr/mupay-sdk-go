@@ -2,6 +2,7 @@ package mupag_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -259,6 +260,8 @@ func TestChargeCreateRejectsUnsafeOrAmbiguousPayloadsBeforeNetwork(t *testing.T)
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Metadata: map[string]any{"nested": map[string]any{"security.code": "123"}}},
 		{AmountCents: 100, PaymentMethod: "credit_card", Customer: validCustomer(), PayerIP: "203.0.113.10"},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), CardTokenID: "tok_123"},
+		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Installments: 1},
+		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), ProductMaxInstallments: 1},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), SplitRules: []mupag.SplitRuleParams{{RecipientID: "recipient_1", ValueType: "fixed_amount"}}},
 	}
 	for index, params := range invalid {
@@ -288,6 +291,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
 		"cardVerificationNumber", "securityValue", "cardIdentificationNumber",
+		"cardCsc", "cardCid", "csc_value", "cidCode", "cardCsc2Number", "cardCid3Value",
 	} {
 		t.Run(key, func(t *testing.T) {
 			params := validPixCharge()
@@ -329,6 +333,34 @@ func TestChargeCreateSendsTheValidatedMetadataSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(requestBody, `"metadata":{"note":"validated"}`) || strings.Contains(requestBody, "4111111111111111") {
 		t.Fatalf("request did not reuse validated metadata snapshot: %s", requestBody)
+	}
+}
+
+func TestChargeCreateCanonicalizesTheValidatedMetadataSnapshot(t *testing.T) {
+	var requestBody string
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				return nil, err
+			}
+			requestBody = string(body)
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	params := validPixCharge()
+	params.Metadata = map[string]any{
+		"nested": json.RawMessage(`{"note":"4111111111111111","note":"safe"}`),
+	}
+
+	if _, err := client.Charges.Create(context.Background(), params); err != nil {
+		t.Fatalf("create charge: %v", err)
+	}
+	if strings.Contains(requestBody, "4111111111111111") || strings.Count(requestBody, `"note"`) != 1 {
+		t.Fatalf("request did not canonicalize validated metadata snapshot: %s", requestBody)
 	}
 }
 

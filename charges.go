@@ -103,14 +103,22 @@ func (charge *Charge) validateResponse() error {
 
 type chargeCreateResponse struct {
 	Charge
-	expectedAmountCents int64
-	expectedCouponCode  string
-	allowDiscount       bool
-	CouponCode          *string `json:"coupon_code,omitempty"`
+	expectedAmountCents   int64
+	expectedCouponCode    string
+	expectedPaymentMethod string
+	allowDiscount         bool
+	CouponCode            json.RawMessage `json:"coupon_code,omitempty"`
+	PaymentMethod         json.RawMessage `json:"payment_method,omitempty"`
 }
 
 func (response *chargeCreateResponse) validateResponse() error {
 	if err := response.Charge.validateResponse(); err != nil {
+		return err
+	}
+	if err := response.validatePaymentMethodEcho(); err != nil {
+		return err
+	}
+	if err := response.validateCouponEcho(); err != nil {
 		return err
 	}
 	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
@@ -120,12 +128,34 @@ func (response *chargeCreateResponse) validateResponse() error {
 	return nil
 }
 
+func (response *chargeCreateResponse) validatePaymentMethodEcho() error {
+	if response.PaymentMethod == nil {
+		return nil
+	}
+	var actual *string
+	if err := json.Unmarshal(response.PaymentMethod, &actual); err != nil ||
+		(actual != nil && *actual != response.expectedPaymentMethod) {
+		return errors.New("mupag: API returned a charge payment method that does not match the request")
+	}
+	return nil
+}
+
+func (response *chargeCreateResponse) validateCouponEcho() error {
+	if response.CouponCode == nil {
+		return nil
+	}
+	var actual *string
+	if err := json.Unmarshal(response.CouponCode, &actual); err != nil ||
+		actual == nil && response.expectedCouponCode != "" ||
+		actual != nil && (response.expectedCouponCode == "" || strings.TrimSpace(*actual) != response.expectedCouponCode) {
+		return errors.New("mupag: API returned a charge coupon that does not match the request")
+	}
+	return nil
+}
+
 func (response *chargeCreateResponse) validateResponseAfterAmbiguousRetry() error {
 	if response.AmountCents != response.expectedAmountCents {
 		return errors.New("mupag: discounted charge response cannot be correlated after an ambiguous retry")
-	}
-	if response.CouponCode != nil && strings.TrimSpace(*response.CouponCode) != response.expectedCouponCode {
-		return errors.New("mupag: charge coupon cannot be correlated after an ambiguous retry")
 	}
 	return nil
 }
@@ -235,9 +265,10 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 	params.Metadata = nil
 	request := chargeCreateRequest{ChargeCreateParams: params, Metadata: metadataSnapshot}
 	response := chargeCreateResponse{
-		expectedAmountCents: params.AmountCents,
-		expectedCouponCode:  strings.TrimSpace(params.CouponCode),
-		allowDiscount:       strings.TrimSpace(params.CouponCode) != "",
+		expectedAmountCents:   params.AmountCents,
+		expectedCouponCode:    strings.TrimSpace(params.CouponCode),
+		expectedPaymentMethod: params.PaymentMethod,
+		allowDiscount:         strings.TrimSpace(params.CouponCode) != "",
 	}
 	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, request, &response, opts...)
 	if err != nil {
@@ -264,6 +295,9 @@ func validateChargeCreateParams(params ChargeCreateParams, metadataSnapshot *jso
 	}
 	if params.ProductMaxInstallments < 0 || params.ProductMaxInstallments > 1 {
 		return errors.New("mupag: product_max_installments must be 1 when provided")
+	}
+	if params.PaymentMethod == "pix" && (params.Installments != 0 || params.ProductMaxInstallments != 0) {
+		return errors.New("mupag: installment fields are not allowed for pix")
 	}
 	if params.ExpiresInSeconds != 0 && params.ExpiresInSeconds < 60 {
 		return errors.New("mupag: expires_in_seconds must be at least 60")
@@ -421,7 +455,11 @@ func validateMetadata(metadata map[string]any) (json.RawMessage, error) {
 			}
 		}
 	}
-	return json.RawMessage(encoded), nil
+	canonical, err := json.Marshal(decoded)
+	if err != nil {
+		return nil, errors.New("mupag: metadata must be valid JSON")
+	}
+	return json.RawMessage(canonical), nil
 }
 
 func isForbiddenSensitiveMetadataKey(compact string) bool {
@@ -431,7 +469,7 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 	}
 
 	base := strings.TrimRight(compact, "0123456789")
-	for _, token := range []string{"cvv", "cvc"} {
+	for _, token := range []string{"cvv", "cvc", "csc", "cid"} {
 		index := strings.LastIndex(base, token)
 		if index == -1 {
 			continue

@@ -45,6 +45,32 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 			couponCode:  "SAVE50",
 			wantUnknown: true,
 		},
+		{
+			name:        "explicitly divergent coupon",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"coupon_code":"OTHER"}`,
+			key:         "charge-correlation-coupon-divergent",
+			couponCode:  "SAVE50",
+			wantUnknown: true,
+		},
+		{
+			name:       "null coupon without requested coupon",
+			body:       `{"charge_id":"charge_1","status":"pending","amount_cents":100,"coupon_code":null}`,
+			key:        "charge-correlation-null-coupon-absent",
+			wantAmount: 100,
+		},
+		{
+			name:        "null coupon with requested coupon",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"coupon_code":null}`,
+			key:         "charge-correlation-null-coupon-divergent",
+			couponCode:  "SAVE50",
+			wantUnknown: true,
+		},
+		{
+			name:        "divergent payment method echo",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"payment_method":"credit_card"}`,
+			key:         "charge-correlation-payment-method-divergent",
+			wantUnknown: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -116,40 +142,66 @@ func TestChargeCreateDoesNotConfirmCouponDiscountAfterAmbiguousRetry(t *testing.
 	}
 }
 
-func TestChargeCreateDoesNotConfirmDivergentCouponAfterAmbiguousRetry(t *testing.T) {
-	var attempts int
-	var sentKeys []string
-	client := testClientWithResults(
-		t,
-		1,
-		[]roundTripResult{
-			{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)},
-			{response: jsonHTTPResponse(http.StatusCreated, `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"coupon_code":"OTHER"}`)},
+func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		key  string
+	}{
+		{
+			name: "divergent coupon",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"coupon_code":"OTHER"}`,
+			key:  "coupon-divergent-retry-key",
 		},
-		&attempts,
-		&sentKeys,
-	)
-	params := validPixCharge()
-	params.CouponCode = "SAVE50"
+		{
+			name: "null coupon",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"coupon_code":null}`,
+			key:  "coupon-null-retry-key",
+		},
+		{
+			name: "divergent payment method",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"payment_method":"credit_card"}`,
+			key:  "payment-method-divergent-retry-key",
+		},
+	}
 
-	charge, err := client.Charges.Create(
-		context.Background(),
-		params,
-		mupag.WithIdempotencyKey("coupon-divergent-retry-key"),
-	)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			var sentKeys []string
+			client := testClientWithResults(
+				t,
+				1,
+				[]roundTripResult{
+					{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)},
+					{response: jsonHTTPResponse(http.StatusCreated, test.body)},
+				},
+				&attempts,
+				&sentKeys,
+			)
+			params := validPixCharge()
+			params.CouponCode = "SAVE50"
 
-	var outcomeErr *mupag.OutcomeUnknownError
-	if !errors.As(err, &outcomeErr) {
-		t.Fatalf("err = %T (%v), want *mupag.OutcomeUnknownError", err, err)
-	}
-	if charge != nil {
-		t.Fatalf("charge = %#v, want nil", charge)
-	}
-	if outcomeErr.IdempotencyKey != "coupon-divergent-retry-key" {
-		t.Fatalf("idempotency key = %q", outcomeErr.IdempotencyKey)
-	}
-	if attempts != 2 || len(sentKeys) != 2 || sentKeys[0] != sentKeys[1] {
-		t.Fatalf("attempts = %d, keys = %#v", attempts, sentKeys)
+			charge, err := client.Charges.Create(
+				context.Background(),
+				params,
+				mupag.WithIdempotencyKey(test.key),
+			)
+
+			var outcomeErr *mupag.OutcomeUnknownError
+			if !errors.As(err, &outcomeErr) {
+				t.Fatalf("err = %T (%v), want *mupag.OutcomeUnknownError", err, err)
+			}
+			if charge != nil {
+				t.Fatalf("charge = %#v, want nil", charge)
+			}
+			if outcomeErr.IdempotencyKey != test.key {
+				t.Fatalf("idempotency key = %q, want %q", outcomeErr.IdempotencyKey, test.key)
+			}
+			if attempts != 2 || len(sentKeys) != 2 || sentKeys[0] != sentKeys[1] {
+				t.Fatalf("attempts = %d, keys = %#v", attempts, sentKeys)
+			}
+		})
 	}
 }
 
