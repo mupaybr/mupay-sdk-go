@@ -51,6 +51,11 @@ type ChargeCreateParams struct {
 	InitialMITReferenceID  string            `json:"initial_mit_reference_id,omitempty"`
 }
 
+type chargeCreateRequest struct {
+	ChargeCreateParams
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
 // SplitRuleParams descreve uma regra publica de split enviada ao BaaS.
 type SplitRuleParams struct {
 	RecipientID string `json:"recipient_id,omitempty"`
@@ -99,7 +104,9 @@ func (charge *Charge) validateResponse() error {
 type chargeCreateResponse struct {
 	Charge
 	expectedAmountCents int64
+	expectedCouponCode  string
 	allowDiscount       bool
+	CouponCode          *string `json:"coupon_code,omitempty"`
 }
 
 func (response *chargeCreateResponse) validateResponse() error {
@@ -116,6 +123,9 @@ func (response *chargeCreateResponse) validateResponse() error {
 func (response *chargeCreateResponse) validateResponseAfterAmbiguousRetry() error {
 	if response.AmountCents != response.expectedAmountCents {
 		return errors.New("mupag: discounted charge response cannot be correlated after an ambiguous retry")
+	}
+	if response.CouponCode != nil && strings.TrimSpace(*response.CouponCode) != response.expectedCouponCode {
+		return errors.New("mupag: charge coupon cannot be correlated after an ambiguous retry")
 	}
 	return nil
 }
@@ -218,21 +228,25 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 			return nil, err
 		}
 	}
-	if err := validateChargeCreateParams(params); err != nil {
+	var metadataSnapshot json.RawMessage
+	if err := validateChargeCreateParams(params, &metadataSnapshot); err != nil {
 		return nil, err
 	}
+	params.Metadata = nil
+	request := chargeCreateRequest{ChargeCreateParams: params, Metadata: metadataSnapshot}
 	response := chargeCreateResponse{
 		expectedAmountCents: params.AmountCents,
+		expectedCouponCode:  strings.TrimSpace(params.CouponCode),
 		allowDiscount:       strings.TrimSpace(params.CouponCode) != "",
 	}
-	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, params, &response, opts...)
+	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, request, &response, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return &response.Charge, nil
 }
 
-func validateChargeCreateParams(params ChargeCreateParams) error {
+func validateChargeCreateParams(params ChargeCreateParams, metadataSnapshot *json.RawMessage) error {
 	if params.AmountCents < 100 || params.AmountCents > maxMoneyCents {
 		return errors.New("mupag: amount_cents must be between 100 and 9000000000000000")
 	}
@@ -266,18 +280,20 @@ func validateChargeCreateParams(params ChargeCreateParams) error {
 	if params.AuthOnly {
 		return errors.New("mupag: auth_only is not supported")
 	}
-	if err := validateMetadata(params.Metadata); err != nil {
+	snapshot, err := validateMetadata(params.Metadata)
+	if err != nil {
 		return err
 	}
+	*metadataSnapshot = snapshot
 	hasRawToken := params.CardToken != ""
 	hasStoredToken := params.CardTokenID != ""
 	if params.PaymentMethod == "credit_card" && params.PayerIP == "" {
 		return errors.New("mupag: credit_card requires payer_ip")
 	}
-	if hasRawToken && (len(params.CardToken) > 4096 || strings.ContainsAny(params.CardToken, "\r\n\x00")) {
+	if hasRawToken && (len(params.CardToken) > 4096 || strings.ContainsAny(params.CardToken, "\r\n\x00") || containsPANLikeSequence(params.CardToken)) {
 		return errors.New("mupag: invalid card_token")
 	}
-	if hasStoredToken && !validResourceID(params.CardTokenID) {
+	if hasStoredToken && (!validResourceID(params.CardTokenID) || containsPANLikeSequence(params.CardTokenID)) {
 		return errors.New("mupag: invalid card_token_id")
 	}
 	if params.PaymentMethod == "credit_card" && hasRawToken == hasStoredToken {
@@ -340,19 +356,19 @@ func splitPercentageCents(amountCents int64, valueBPS int) int64 {
 	return amountCents/10_000*bps + amountCents%10_000*bps/10_000
 }
 
-func validateMetadata(metadata map[string]any) error {
+func validateMetadata(metadata map[string]any) (json.RawMessage, error) {
 	if metadata == nil {
-		return nil
+		return nil, nil
 	}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
-		return errors.New("mupag: metadata must be valid JSON")
+		return nil, errors.New("mupag: metadata must be valid JSON")
 	}
 	var decoded any
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {
-		return errors.New("mupag: metadata must be valid JSON")
+		return nil, errors.New("mupag: metadata must be valid JSON")
 	}
 	stack := []struct {
 		value any
@@ -364,7 +380,7 @@ func validateMetadata(metadata map[string]any) error {
 		stack = stack[:len(stack)-1]
 		nodes++
 		if nodes > 10_000 || current.depth > 32 {
-			return errors.New("mupag: metadata exceeds complexity limit")
+			return nil, errors.New("mupag: metadata exceeds complexity limit")
 		}
 		switch value := current.value.(type) {
 		case map[string]any:
@@ -372,7 +388,7 @@ func validateMetadata(metadata map[string]any) error {
 				normalized := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(key))
 				switch normalized {
 				case "__proto__", "prototype", "constructor":
-					return errors.New("mupag: metadata contains forbidden sensitive field")
+					return nil, errors.New("mupag: metadata contains forbidden sensitive field")
 				}
 				compact := strings.Map(func(character rune) rune {
 					if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
@@ -381,7 +397,7 @@ func validateMetadata(metadata map[string]any) error {
 					return -1
 				}, strings.ToLower(key))
 				if isForbiddenSensitiveMetadataKey(compact) {
-					return errors.New("mupag: metadata contains forbidden sensitive field")
+					return nil, errors.New("mupag: metadata contains forbidden sensitive field")
 				}
 				stack = append(stack, struct {
 					value any
@@ -397,15 +413,15 @@ func validateMetadata(metadata map[string]any) error {
 			}
 		case string:
 			if containsPANLikeSequence(value) {
-				return errors.New("mupag: metadata contains possible payment card number")
+				return nil, errors.New("mupag: metadata contains possible payment card number")
 			}
 		case json.Number:
 			if containsPANLikeSequence(value.String()) {
-				return errors.New("mupag: metadata contains possible payment card number")
+				return nil, errors.New("mupag: metadata contains possible payment card number")
 			}
 		}
 	}
-	return nil
+	return json.RawMessage(encoded), nil
 }
 
 func isForbiddenSensitiveMetadataKey(compact string) bool {
@@ -428,7 +444,8 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 	}
 	return strings.HasSuffix(base, "securitycode") ||
 		strings.HasSuffix(base, "verificationcode") ||
-		strings.HasSuffix(base, "verificationvalue")
+		strings.HasSuffix(base, "verificationvalue") ||
+		strings.HasSuffix(base, "verificationnumber")
 }
 
 func containsPANLikeSequence(value string) bool {

@@ -116,6 +116,43 @@ func TestChargeCreateDoesNotConfirmCouponDiscountAfterAmbiguousRetry(t *testing.
 	}
 }
 
+func TestChargeCreateDoesNotConfirmDivergentCouponAfterAmbiguousRetry(t *testing.T) {
+	var attempts int
+	var sentKeys []string
+	client := testClientWithResults(
+		t,
+		1,
+		[]roundTripResult{
+			{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)},
+			{response: jsonHTTPResponse(http.StatusCreated, `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"coupon_code":"OTHER"}`)},
+		},
+		&attempts,
+		&sentKeys,
+	)
+	params := validPixCharge()
+	params.CouponCode = "SAVE50"
+
+	charge, err := client.Charges.Create(
+		context.Background(),
+		params,
+		mupag.WithIdempotencyKey("coupon-divergent-retry-key"),
+	)
+
+	var outcomeErr *mupag.OutcomeUnknownError
+	if !errors.As(err, &outcomeErr) {
+		t.Fatalf("err = %T (%v), want *mupag.OutcomeUnknownError", err, err)
+	}
+	if charge != nil {
+		t.Fatalf("charge = %#v, want nil", charge)
+	}
+	if outcomeErr.IdempotencyKey != "coupon-divergent-retry-key" {
+		t.Fatalf("idempotency key = %q", outcomeErr.IdempotencyKey)
+	}
+	if attempts != 2 || len(sentKeys) != 2 || sentKeys[0] != sentKeys[1] {
+		t.Fatalf("attempts = %d, keys = %#v", attempts, sentKeys)
+	}
+}
+
 func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 	partialAmount := int64(100)
 	tests := []struct {

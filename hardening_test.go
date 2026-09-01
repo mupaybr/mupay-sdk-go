@@ -13,6 +13,18 @@ import (
 	mupag "github.com/mupaybr/mupag-sdk-go"
 )
 
+type changingMetadataValue struct {
+	calls int
+}
+
+func (value *changingMetadataValue) MarshalJSON() ([]byte, error) {
+	value.calls++
+	if value.calls == 1 {
+		return []byte(`"validated"`), nil
+	}
+	return []byte(`"4111111111111111"`), nil
+}
+
 func TestClientFailsClosedWhenEnvironmentIsMissingOrKeyDoesNotMatch(t *testing.T) {
 	requests := 0
 	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -275,12 +287,79 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv2", "cvc2", "cardCvv", "cardSecurityCode", "cardVerificationCode",
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
+		"cardVerificationNumber",
 	} {
 		t.Run(key, func(t *testing.T) {
 			params := validPixCharge()
 			params.Metadata = map[string]any{key: "123"}
 			if _, err := client.Charges.Create(context.Background(), params); err == nil {
 				t.Fatalf("sensitive metadata key %q was accepted", key)
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
+func TestChargeCreateSendsTheValidatedMetadataSnapshot(t *testing.T) {
+	var requestBody string
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				return nil, err
+			}
+			requestBody = string(body)
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	changingValue := &changingMetadataValue{}
+	params := validPixCharge()
+	params.Metadata = map[string]any{"note": changingValue}
+
+	if _, err := client.Charges.Create(context.Background(), params); err != nil {
+		t.Fatalf("create charge: %v", err)
+	}
+	if changingValue.calls != 1 {
+		t.Fatalf("metadata marshaler calls = %d, want 1", changingValue.calls)
+	}
+	if !strings.Contains(requestBody, `"metadata":{"note":"validated"}`) || strings.Contains(requestBody, "4111111111111111") {
+		t.Fatalf("request did not reuse validated metadata snapshot: %s", requestBody)
+	}
+}
+
+func TestChargeCreateRejectsPANInCardTokenFieldsBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+
+	for _, test := range []struct {
+		name        string
+		cardToken   string
+		cardTokenID string
+	}{
+		{name: "raw card token", cardToken: "4111111111111111"},
+		{name: "stored card token id", cardTokenID: "4111111111111111"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			params := validPixCharge()
+			params.PaymentMethod = "credit_card"
+			params.PayerIP = "203.0.113.10"
+			params.CardToken = test.cardToken
+			params.CardTokenID = test.cardTokenID
+			if _, err := client.Charges.Create(context.Background(), params); err == nil {
+				t.Fatal("PAN-like card token was accepted")
 			}
 		})
 	}

@@ -191,8 +191,9 @@ Todos compilam com `go test ./...`.
 
 ## Desenvolvimento
 
+Execute a partir da raiz do repositorio:
+
 ```bash
-cd sdks/go
 go test ./...
 go test -coverprofile coverage.out .
 go vet ./...
