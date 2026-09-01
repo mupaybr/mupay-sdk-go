@@ -1,6 +1,7 @@
 package mupag
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ChargesService agrupa operacoes de cobranca da API publica.
@@ -107,6 +109,13 @@ func (response *chargeCreateResponse) validateResponse() error {
 	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
 		(!response.allowDiscount && response.AmountCents != response.expectedAmountCents) {
 		return errors.New("mupag: API returned a charge amount that does not match the request")
+	}
+	return nil
+}
+
+func (response *chargeCreateResponse) validateResponseAfterAmbiguousRetry() error {
+	if response.AmountCents != response.expectedAmountCents {
+		return errors.New("mupag: discounted charge response cannot be correlated after an ambiguous retry")
 	}
 	return nil
 }
@@ -340,7 +349,9 @@ func validateMetadata(metadata map[string]any) error {
 		return errors.New("mupag: metadata must be valid JSON")
 	}
 	var decoded any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
 		return errors.New("mupag: metadata must be valid JSON")
 	}
 	stack := []struct {
@@ -385,9 +396,78 @@ func validateMetadata(metadata map[string]any) error {
 					depth int
 				}{child, current.depth + 1})
 			}
+		case string:
+			if containsPANLikeSequence(value) {
+				return errors.New("mupag: metadata contains possible payment card number")
+			}
+		case json.Number:
+			if validPANSequence([]byte(value.String())) {
+				return errors.New("mupag: metadata contains possible payment card number")
+			}
 		}
 	}
 	return nil
+}
+
+func containsPANLikeSequence(value string) bool {
+	digits := make([]byte, 0, 19)
+	tooLong := false
+	flush := func() bool {
+		matched := !tooLong && validPANSequence(digits)
+		digits = digits[:0]
+		tooLong = false
+		return matched
+	}
+	for _, character := range value {
+		switch {
+		case character >= '0' && character <= '9':
+			if len(digits) < 20 {
+				digits = append(digits, byte(character))
+			} else {
+				tooLong = true
+			}
+		case character == '-' || unicode.IsSpace(character):
+			continue
+		default:
+			if flush() {
+				return true
+			}
+		}
+	}
+	return flush()
+}
+
+func validPANSequence(digits []byte) bool {
+	if len(digits) < 12 || len(digits) > 19 {
+		return false
+	}
+	distinct := false
+	for _, digit := range digits[1:] {
+		if digit != digits[0] {
+			distinct = true
+			break
+		}
+	}
+	if !distinct {
+		return false
+	}
+	sum := 0
+	double := false
+	for index := len(digits) - 1; index >= 0; index-- {
+		if digits[index] < '0' || digits[index] > '9' {
+			return false
+		}
+		value := int(digits[index] - '0')
+		if double {
+			value *= 2
+			if value > 9 {
+				value -= 9
+			}
+		}
+		sum += value
+		double = !double
+	}
+	return sum%10 == 0
 }
 
 func invalidText(value string, maximum int) bool {

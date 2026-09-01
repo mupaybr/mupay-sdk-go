@@ -189,7 +189,7 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 	var lastErr error
 	var ambiguousErr error
 	for attempt := 0; attempt < attempts; attempt++ {
-		err = client.doOnce(ctx, method, path, query, encodedBody, out, requestOptions)
+		err = client.doOnce(ctx, method, path, query, encodedBody, out, requestOptions, ambiguousErr != nil)
 		if err == nil {
 			return nil
 		}
@@ -221,7 +221,7 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 	return lastErr
 }
 
-func (client *Client) doOnce(ctx context.Context, method, path string, query url.Values, body []byte, out any, opts requestOptions) error {
+func (client *Client) doOnce(ctx context.Context, method, path string, query url.Values, body []byte, out any, opts requestOptions, afterAmbiguousFailure bool) error {
 	endpoint, err := url.Parse(client.baseURL + path)
 	if err != nil {
 		return err
@@ -286,11 +286,20 @@ func (client *Client) doOnce(ctx context.Context, method, path string, query url
 			return &ambiguousResponseError{cause: err}
 		}
 	}
+	if validator, ok := out.(ambiguousRetryResponseValidator); ok && afterAmbiguousFailure {
+		if err := validator.validateResponseAfterAmbiguousRetry(); err != nil {
+			return &ambiguousResponseError{cause: err}
+		}
+	}
 	return nil
 }
 
 type responseValidator interface {
 	validateResponse() error
+}
+
+type ambiguousRetryResponseValidator interface {
+	validateResponseAfterAmbiguousRetry() error
 }
 
 func randomHex(size int) (string, error) {

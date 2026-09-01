@@ -259,6 +259,60 @@ func TestChargeCreateRejectsUnsafeOrAmbiguousPayloadsBeforeNetwork(t *testing.T)
 	}
 }
 
+func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	tests := []struct {
+		name     string
+		metadata map[string]any
+	}{
+		{
+			name:     "JSON string with separators",
+			metadata: map[string]any{"note": "4111 1111-1111 1111"},
+		},
+		{
+			name: "nested value",
+			metadata: map[string]any{
+				"order": []any{map[string]any{"note": "card 4111-1111-1111-1111"}},
+			},
+		},
+		{
+			name:     "exact JSON number",
+			metadata: map[string]any{"note": int64(4111111111111111)},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			params := validPixCharge()
+			params.Metadata = test.metadata
+			if _, err := client.Charges.Create(context.Background(), params); err == nil {
+				t.Fatal("PAN-like metadata value was accepted")
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+
+	params := validPixCharge()
+	params.Metadata = map[string]any{"note": "4111 1111 1111 1112"}
+	if _, err := client.Charges.Create(context.Background(), params); err != nil {
+		t.Fatalf("non-Luhn metadata was rejected: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("network requests = %d, want 1 after safe metadata", requests)
+	}
+}
+
 func TestChargeCreateRequiresInlineIdentityAndLiteralPayerIPBeforeNetwork(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
