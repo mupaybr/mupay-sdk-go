@@ -43,10 +43,19 @@ func (refund *Refund) validateResponse() error {
 	if refund.AmountCents < 1 || refund.AmountCents > maxMoneyCents {
 		return errors.New("mupag: API returned an invalid refund amount")
 	}
-	if refund.Status == "" || len(refund.Status) > 64 {
+	if !validRefundStatus(refund.Status) {
 		return errors.New("mupag: API returned an invalid refund status")
 	}
 	return nil
+}
+
+func validRefundStatus(status string) bool {
+	switch status {
+	case "requested", "processing", "completed", "failed", "cancelled", "unknown":
+		return true
+	default:
+		return false
+	}
 }
 
 type refundCreateResponse struct {

@@ -50,7 +50,7 @@ func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		writeJSON(writer, http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"pending"}`)
+		writeJSON(writer, http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested"}`)
 	}))
 	defer server.Close()
 
@@ -67,7 +67,7 @@ func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 	if body["full"] != true || body["amount_cents"] != nil || idempotencyKey != "refund_order_1" {
 		t.Fatalf("body=%v idempotency=%q", body, idempotencyKey)
 	}
-	if refund.RefundID != "refund_1" || refund.Status != "pending" {
+	if refund.RefundID != "refund_1" || refund.Status != "requested" {
 		t.Fatalf("refund = %+v", refund)
 	}
 }
