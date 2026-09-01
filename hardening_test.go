@@ -287,6 +287,10 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 			metadata: map[string]any{"note": "order 9 / 4111 1111 1111 1111"},
 		},
 		{
+			name:     "PAN inside a larger uninterrupted numeric group",
+			metadata: map[string]any{"note": "94111111111111111"},
+		},
+		{
 			name: "nested value",
 			metadata: map[string]any{
 				"order": []any{map[string]any{"note": "card 4111-1111-1111-1111"}},

@@ -410,48 +410,39 @@ func validateMetadata(metadata map[string]any) error {
 }
 
 func containsPANLikeSequence(value string) bool {
-	groups := make([][]byte, 0, 8)
 	digits := make([]byte, 0, 19)
-	flushGroup := func() bool {
-		if len(digits) == 0 {
-			return false
-		}
-		groups = append(groups, append([]byte(nil), digits...))
+	digitCount := 0
+	flush := func() bool {
+		matched := digitCount <= 16 && validPANSequence(digits)
 		digits = digits[:0]
-		return panInDigitGroups(groups)
+		digitCount = 0
+		return matched
 	}
 	for _, character := range value {
 		switch {
 		case character >= '0' && character <= '9':
+			if len(digits) == 19 {
+				copy(digits, digits[1:])
+				digits = digits[:18]
+			}
 			digits = append(digits, byte(character))
+			digitCount++
+			if digitCount > 16 {
+				for length := 12; length <= len(digits); length++ {
+					if validPANSequence(digits[len(digits)-length:]) {
+						return true
+					}
+				}
+			}
 		case unicode.IsSpace(character) || unicode.IsPunct(character):
-			if flushGroup() {
-				return true
-			}
+			continue
 		default:
-			if flushGroup() {
-				return true
-			}
-			groups = groups[:0]
-		}
-	}
-	return flushGroup()
-}
-
-func panInDigitGroups(groups [][]byte) bool {
-	for start := range groups {
-		candidate := make([]byte, 0, 19)
-		for end := start; end < len(groups); end++ {
-			if len(candidate)+len(groups[end]) > 19 {
-				break
-			}
-			candidate = append(candidate, groups[end]...)
-			if validPANSequence(candidate) {
+			if flush() {
 				return true
 			}
 		}
 	}
-	return false
+	return flush()
 }
 
 func validPANSequence(digits []byte) bool {
