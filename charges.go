@@ -523,7 +523,10 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 			continue
 		}
 		qualifier := base[:index]
-		if qualifier != "" && !strings.HasSuffix(qualifier, "card") {
+		if qualifier != "" &&
+			!strings.HasSuffix(qualifier, "card") &&
+			qualifier != "amex" &&
+			qualifier != "americanexpress" {
 			continue
 		}
 		descriptor := strings.TrimLeft(base[index+len(token):], "0123456789")
