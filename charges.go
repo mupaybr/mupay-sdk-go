@@ -143,6 +143,25 @@ func (page *ChargePage) validateResponse() error {
 	return nil
 }
 
+type chargeListResponse struct {
+	Data       *[]Charge `json:"data"`
+	NextCursor string    `json:"next_cursor,omitempty"`
+}
+
+func (response *chargeListResponse) validateResponse() error {
+	if response == nil || response.Data == nil {
+		return errors.New("mupag: API returned an invalid charge page")
+	}
+	return response.page().validateResponse()
+}
+
+func (response *chargeListResponse) page() *ChargePage {
+	return &ChargePage{
+		Data:       *response.Data,
+		NextCursor: response.NextCursor,
+	}
+}
+
 // Create envia uma cobranca e gera Idempotency-Key quando o caller omite.
 func (service *ChargesService) Create(ctx context.Context, params ChargeCreateParams, opts ...RequestOption) (*Charge, error) {
 	if service.client.configErr != nil {
@@ -370,11 +389,11 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 		query.Set("cursor", params.Cursor)
 	}
 
-	var page ChargePage
-	if err := service.client.do(ctx, http.MethodGet, "/v1/charges", query, nil, &page); err != nil {
+	var response chargeListResponse
+	if err := service.client.do(ctx, http.MethodGet, "/v1/charges", query, nil, &response); err != nil {
 		return nil, err
 	}
-	return &page, nil
+	return response.page(), nil
 }
 
 func validateChargeListParams(params ChargeListParams) error {

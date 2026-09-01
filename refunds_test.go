@@ -174,4 +174,109 @@ func TestRefundsListByChargeRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 	}
 }
 
+func TestRefundsGetCorrelatesRequestedID(t *testing.T) {
+	tests := []struct {
+		name             string
+		responseRefundID string
+		wantError        bool
+	}{
+		{name: "matching refund", responseRefundID: "refund_1"},
+		{name: "different refund", responseRefundID: "refund_2", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, `{"refund_id":"`+test.responseRefundID+`","charge_id":"charge_1","amount_cents":100,"status":"completed"}`)
+			}))
+			defer server.Close()
+
+			refund, err := newTestClient(server.URL).Refunds.Get(context.Background(), "refund_1")
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("refund = %+v, want correlation error", refund)
+				}
+				return
+			}
+			if err != nil || refund.RefundID != "refund_1" {
+				t.Fatalf("refund=%+v err=%v", refund, err)
+			}
+		})
+	}
+}
+
+func TestRefundsListByChargeCorrelatesItems(t *testing.T) {
+	tests := []struct {
+		name             string
+		responseChargeID string
+		wantError        bool
+	}{
+		{name: "matching charge", responseChargeID: "charge_1"},
+		{name: "different charge", responseChargeID: "charge_2", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, `{"refunds":[{"refund_id":"refund_1","charge_id":"`+test.responseChargeID+`","amount_cents":100,"status":"completed"}]}`)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Refunds.ListByCharge(
+				context.Background(),
+				"charge_1",
+				mupag.RefundListParams{},
+			)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("page = %+v, want correlation error", page)
+				}
+				return
+			}
+			if err != nil || len(page.Refunds) != 1 || page.Refunds[0].ChargeID != "charge_1" {
+				t.Fatalf("page=%+v err=%v", page, err)
+			}
+		})
+	}
+}
+
+func TestRefundsListByChargeRequiresRefundCollection(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError bool
+	}{
+		{name: "missing refunds", body: `{}`, wantError: true},
+		{name: "null refunds", body: `{"refunds":null}`, wantError: true},
+		{name: "empty refunds", body: `{"refunds":[]}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Refunds.ListByCharge(
+				context.Background(),
+				"charge_1",
+				mupag.RefundListParams{},
+			)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("refund page without a refunds collection was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("list empty refund page: %v", err)
+			}
+			if page.Refunds == nil || len(page.Refunds) != 0 {
+				t.Fatalf("refunds = %#v, want a non-nil empty collection", page.Refunds)
+			}
+		})
+	}
+}
+
 func int64Pointer(value int64) *int64 { return &value }

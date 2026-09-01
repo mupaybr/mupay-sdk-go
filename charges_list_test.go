@@ -109,3 +109,38 @@ func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 		})
 	}
 }
+
+func TestChargesListRequiresDataCollection(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError bool
+	}{
+		{name: "missing data", body: `{}`, wantError: true},
+		{name: "null data", body: `{"data":null}`, wantError: true},
+		{name: "empty data", body: `{"data":[]}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{})
+			if test.wantError {
+				if err == nil {
+					t.Fatal("charge page without a data collection was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("list empty charge page: %v", err)
+			}
+			if page.Data == nil || len(page.Data) != 0 {
+				t.Fatalf("data = %#v, want a non-nil empty collection", page.Data)
+			}
+		})
+	}
+}

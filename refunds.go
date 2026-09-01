@@ -69,6 +69,21 @@ func (response *refundCreateResponse) validateResponse() error {
 	return nil
 }
 
+type refundGetResponse struct {
+	Refund
+	expectedRefundID string
+}
+
+func (response *refundGetResponse) validateResponse() error {
+	if err := response.Refund.validateResponse(); err != nil {
+		return err
+	}
+	if response.RefundID != response.expectedRefundID {
+		return errors.New("mupag: API returned a different refund than requested")
+	}
+	return nil
+}
+
 // RefundListParams limita paginação keyset no endpoint de reconciliação.
 type RefundListParams struct {
 	Limit  int
@@ -96,6 +111,35 @@ func (page *RefundPage) validateResponse() error {
 		}
 	}
 	return nil
+}
+
+type refundListResponse struct {
+	Refunds          *[]Refund `json:"refunds"`
+	NextCursor       string    `json:"next_cursor,omitempty"`
+	expectedChargeID string
+}
+
+func (response *refundListResponse) validateResponse() error {
+	if response == nil || response.Refunds == nil {
+		return errors.New("mupag: API returned an invalid refund page")
+	}
+	page := response.page()
+	if err := page.validateResponse(); err != nil {
+		return err
+	}
+	for index := range page.Refunds {
+		if page.Refunds[index].ChargeID != response.expectedChargeID {
+			return errors.New("mupag: API returned a refund for a different charge")
+		}
+	}
+	return nil
+}
+
+func (response *refundListResponse) page() *RefundPage {
+	return &RefundPage{
+		Refunds:    *response.Refunds,
+		NextCursor: response.NextCursor,
+	}
 }
 
 // Create solicita estorno parcial ou total com Idempotency-Key estável.
@@ -133,12 +177,12 @@ func (service *RefundsService) Get(ctx context.Context, refundID string) (*Refun
 	if !validResourceID(refundID) {
 		return nil, errors.New("mupag: invalid refund id")
 	}
-	var refund Refund
+	response := refundGetResponse{expectedRefundID: refundID}
 	path := "/v1/refunds/" + url.PathEscape(refundID)
-	if err := service.client.do(ctx, http.MethodGet, path, nil, nil, &refund); err != nil {
+	if err := service.client.do(ctx, http.MethodGet, path, nil, nil, &response); err != nil {
 		return nil, err
 	}
-	return &refund, nil
+	return &response.Refund, nil
 }
 
 // ListByCharge lista estornos com limite e cursor opaco bounded.
@@ -162,12 +206,12 @@ func (service *RefundsService) ListByCharge(ctx context.Context, chargeID string
 	if params.Cursor != "" {
 		query.Set("cursor", params.Cursor)
 	}
-	var page RefundPage
+	response := refundListResponse{expectedChargeID: chargeID}
 	path := "/v1/charges/" + url.PathEscape(chargeID) + "/refunds"
-	if err := service.client.do(ctx, http.MethodGet, path, query, nil, &page); err != nil {
+	if err := service.client.do(ctx, http.MethodGet, path, query, nil, &response); err != nil {
 		return nil, err
 	}
-	return &page, nil
+	return response.page(), nil
 }
 
 func validateOpaqueCursor(cursor string) error {
