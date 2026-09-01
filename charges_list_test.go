@@ -339,3 +339,18 @@ func TestChargesListAllowsFiltersOmittedFromResponseSchema(t *testing.T) {
 		t.Fatalf("page = %#v, err = %v", page, err)
 	}
 }
+
+func TestChargesListRejectsExplicitlyDivergentPaymentMethod(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("payment_method") != "pix" {
+			t.Fatalf("query = %v", request.URL.Query())
+		}
+		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":"credit_card","created_at":"2026-08-31T12:00:00Z"}]}`)
+	}))
+	defer server.Close()
+
+	page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{PaymentMethod: "pix"})
+	if err == nil || page != nil {
+		t.Fatalf("page = %#v, err = %v, want divergent filter error", page, err)
+	}
+}

@@ -291,7 +291,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
 		"cardVerificationNumber", "securityValue", "cardIdentificationNumber",
-		"cardCsc", "cardCid", "csc_value", "cidCode", "cardCsc2Number", "cardCid3Value",
+		"cardCsc", "cardCid", "csc_value", "cidCode", "cardCsc2Number", "cardCid3Value", "cardSecurityNumber",
 	} {
 		t.Run(key, func(t *testing.T) {
 			params := validPixCharge()
@@ -306,7 +306,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 	}
 }
 
-func TestChargeCreateAllowsNonCardIdentificationMetadataKeys(t *testing.T) {
+func TestChargeCreateAllowsNonCardSensitiveSuffixMetadataKeys(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
 		mupag.WithAPIKey("sk_test_123"),
@@ -318,15 +318,18 @@ func TestChargeCreateAllowsNonCardIdentificationMetadataKeys(t *testing.T) {
 		})}),
 	)
 
-	for _, key := range []string{"taxIdentificationNumber", "orderIdentificationNumber"} {
+	for _, key := range []string{
+		"taxIdentificationNumber", "orderIdentificationNumber",
+		"socialSecurityNumber", "accountSecurityNumber",
+	} {
 		params := validPixCharge()
 		params.Metadata = map[string]any{key: "identifier_123"}
 		if _, err := client.Charges.Create(context.Background(), params); err != nil {
 			t.Fatalf("non-card metadata key %q was rejected: %v", key, err)
 		}
 	}
-	if requests != 2 {
-		t.Fatalf("network requests = %d, want 2", requests)
+	if requests != 4 {
+		t.Fatalf("network requests = %d, want 4", requests)
 	}
 }
 
@@ -421,6 +424,65 @@ func TestChargeCreateRejectsPANInCardTokenFieldsBeforeNetwork(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
+func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	tests := []struct {
+		name  string
+		apply func(*mupag.ChargeCreateParams)
+	}{
+		{name: "description", apply: func(params *mupag.ChargeCreateParams) { params.Description = "invoice 4111 1111 1111 1111" }},
+		{name: "external reference", apply: func(params *mupag.ChargeCreateParams) { params.ExternalReference = "order_4111111111111111" }},
+		{name: "affiliate code", apply: func(params *mupag.ChargeCreateParams) { params.AffiliateCode = "affiliate-4111111111111111" }},
+		{name: "coupon code", apply: func(params *mupag.ChargeCreateParams) { params.CouponCode = "SAVE-4111111111111111" }},
+		{name: "customer name", apply: func(params *mupag.ChargeCreateParams) { params.Customer.Name = "Ana 4111111111111111" }},
+		{name: "customer email", apply: func(params *mupag.ChargeCreateParams) { params.Customer.Email = "4111111111111111@example.com" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			params := validPixCharge()
+			test.apply(&params)
+			if _, err := client.Charges.Create(context.Background(), params); err == nil {
+				t.Fatal("PAN-like free text was accepted")
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
+func TestChargeCreateAllowsPANLikeDigitsInStructuredIdentityFields(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+	params := validPixCharge()
+	params.Customer.ID = "customer_4111111111111111"
+	params.Customer.TaxID = "41234567890120"
+
+	if _, err := client.Charges.Create(context.Background(), params); err != nil {
+		t.Fatalf("structured identity fields were rejected: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("network requests = %d, want 1", requests)
 	}
 }
 

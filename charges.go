@@ -69,6 +69,7 @@ type Charge struct {
 	ChargeID              string     `json:"charge_id"`
 	Status                string     `json:"status"`
 	AmountCents           int64      `json:"amount_cents"`
+	PaymentMethod         string     `json:"payment_method,omitempty"`
 	PSPChargeID           string     `json:"psp_charge_id"`
 	CardTokenID           string     `json:"card_token_id,omitempty"`
 	CardBrand             string     `json:"card_brand,omitempty"`
@@ -97,6 +98,9 @@ func (charge *Charge) validateResponse() error {
 	}
 	if charge.AmountCents < 1 || charge.AmountCents > maxMoneyCents {
 		return errors.New("mupag: API returned an invalid charge amount")
+	}
+	if charge.PaymentMethod != "" && charge.PaymentMethod != "pix" && charge.PaymentMethod != "credit_card" {
+		return errors.New("mupag: API returned an invalid charge payment method")
 	}
 	return nil
 }
@@ -134,7 +138,7 @@ func (response *chargeCreateResponse) validatePaymentMethodEcho() error {
 	}
 	var actual *string
 	if err := json.Unmarshal(response.PaymentMethod, &actual); err != nil ||
-		(actual != nil && *actual != response.expectedPaymentMethod) {
+		actual == nil || *actual != response.expectedPaymentMethod {
 		return errors.New("mupag: API returned a charge payment method that does not match the request")
 	}
 	return nil
@@ -201,6 +205,7 @@ type chargeListResponse struct {
 	Data                   *[]Charge `json:"data"`
 	NextCursor             string    `json:"next_cursor,omitempty"`
 	expectedStatus         string
+	expectedPaymentMethod  string
 	expectedCreatedAtFrom  time.Time
 	expectedCreatedAtTo    time.Time
 	expectedLimit          int
@@ -226,6 +231,9 @@ func (response *chargeListResponse) validateResponse() error {
 		}
 		if response.expectedStatus != "" && charge.Status != response.expectedStatus {
 			return errors.New("mupag: API returned a charge outside the requested status")
+		}
+		if response.expectedPaymentMethod != "" && charge.PaymentMethod != "" && charge.PaymentMethod != response.expectedPaymentMethod {
+			return errors.New("mupag: API returned a charge outside the requested payment method")
 		}
 		if response.correlateCreatedAtFrom && charge.CreatedAt.Before(response.expectedCreatedAtFrom) {
 			return errors.New("mupag: API returned a charge before created_at_from")
@@ -289,6 +297,9 @@ func validateChargeCreateParams(params ChargeCreateParams, metadataSnapshot *jso
 	}
 	if invalidText(params.Customer.Name, 200) || invalidText(params.Customer.Email, 254) || !validEmail(params.Customer.Email) || !validTaxID(params.Customer.TaxID) {
 		return errors.New("mupag: customer name, email and 11/14-digit tax_id are required")
+	}
+	if containsPANInChargeFreeText(params) {
+		return errors.New("mupag: free-text fields cannot contain payment card numbers")
 	}
 	if params.Installments < 0 || params.Installments > 1 {
 		return errors.New("mupag: installments must be 1 when provided")
@@ -482,10 +493,27 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 	}
 	return strings.HasSuffix(base, "securitycode") ||
 		strings.HasSuffix(base, "securityvalue") ||
+		strings.HasSuffix(base, "cardsecuritynumber") ||
 		strings.HasSuffix(base, "verificationcode") ||
 		strings.HasSuffix(base, "verificationvalue") ||
 		strings.HasSuffix(base, "verificationnumber") ||
 		strings.HasSuffix(base, "cardidentificationnumber")
+}
+
+func containsPANInChargeFreeText(params ChargeCreateParams) bool {
+	for _, value := range []string{
+		params.Description,
+		params.ExternalReference,
+		params.AffiliateCode,
+		params.CouponCode,
+		params.Customer.Name,
+		params.Customer.Email,
+	} {
+		if containsPANLikeSequence(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsPANLikeSequence(value string) bool {
@@ -614,7 +642,11 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 	if expectedLimit == 0 {
 		expectedLimit = 25
 	}
-	response := chargeListResponse{expectedStatus: params.Status, expectedLimit: expectedLimit}
+	response := chargeListResponse{
+		expectedStatus:        params.Status,
+		expectedPaymentMethod: params.PaymentMethod,
+		expectedLimit:         expectedLimit,
+	}
 	if params.CreatedAtFrom != nil {
 		response.expectedCreatedAtFrom = params.CreatedAtFrom.UTC()
 		response.correlateCreatedAtFrom = true

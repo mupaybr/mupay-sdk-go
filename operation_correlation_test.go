@@ -71,6 +71,12 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 			key:         "charge-correlation-payment-method-divergent",
 			wantUnknown: true,
 		},
+		{
+			name:        "null payment method echo",
+			body:        `{"charge_id":"charge_1","status":"pending","amount_cents":100,"payment_method":null}`,
+			key:         "charge-correlation-payment-method-null",
+			wantUnknown: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -162,6 +168,11 @@ func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T
 			name: "divergent payment method",
 			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"payment_method":"credit_card"}`,
 			key:  "payment-method-divergent-retry-key",
+		},
+		{
+			name: "null payment method",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"payment_method":null}`,
+			key:  "payment-method-null-retry-key",
 		},
 	}
 

@@ -135,6 +135,18 @@ func TestRefundsGetAndListByChargeUseBoundedReadContracts(t *testing.T) {
 	}
 }
 
+func TestRefundsListByChargeTreatsEmptyNextCursorAsTerminal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writeJSON(writer, http.StatusOK, `{"refunds":[],"next_cursor":""}`)
+	}))
+	defer server.Close()
+
+	page, err := newTestClient(server.URL).Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{})
+	if err != nil || page == nil || page.NextCursor != "" {
+		t.Fatalf("page = %#v, err = %v, want terminal empty cursor", page, err)
+	}
+}
+
 func TestRefundReadsRejectUnsafeIdentifiersAndPaginationBeforeNetwork(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
