@@ -167,6 +167,7 @@ func TestSubscriptionCancelRejectsPathInjectionAndUnknownModeBeforeNetwork(t *te
 		{id: "sub_123", mode: "later"},
 		{id: "4111111111111111", mode: "immediate"},
 		{id: "sub_123", mode: "immediate", reason: "customer used 4111 1111 1111 1111"},
+		{id: "sub_123", mode: "immediate", reason: "customer used 4111\x001111\x001111\x001111"},
 	} {
 		_, err := client.Subscriptions.Cancel(
 			context.Background(),

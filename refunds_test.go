@@ -63,6 +63,10 @@ func TestRefundOperationsRejectPANBeforeNetwork(t *testing.T) {
 			_, err := client.Refunds.Create(context.Background(), "charge_1", mupag.RefundCreateParams{Full: true, Reason: "customer used 4111 1111 1111 1111"})
 			return err
 		}},
+		{name: "create reason with control separators", run: func() error {
+			_, err := client.Refunds.Create(context.Background(), "charge_1", mupag.RefundCreateParams{Full: true, Reason: "customer used 4111\x001111\x001111\x001111"})
+			return err
+		}},
 		{name: "get refund id", run: func() error {
 			_, err := client.Refunds.Get(context.Background(), pan)
 			return err

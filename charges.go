@@ -620,7 +620,7 @@ func containsPANLikeSequence(value string) bool {
 					return true
 				}
 			}
-		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character) || unicode.Is(unicode.Cf, character) || unicode.IsMark(character):
+		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character) || unicode.IsControl(character) || unicode.Is(unicode.Cf, character) || unicode.IsMark(character):
 			continue
 		default:
 			digits = digits[:0]
