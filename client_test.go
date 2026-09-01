@@ -392,7 +392,7 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 	subscription, err := client.Subscriptions.Cancel(
 		context.Background(),
 		"sub_123",
-		mupag.CancelSubscriptionParams{Mode: "immediate", Reason: "  pedido do cliente\t"},
+		mupag.CancelSubscriptionParams{Mode: "immediate", Reason: "\x00  pedido do cliente\t\x00"},
 		mupag.WithIdempotencyKey("cancel_sub_123"),
 	)
 	if err != nil {
