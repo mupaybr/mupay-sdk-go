@@ -88,7 +88,7 @@ func (charge *Charge) validateResponse() error {
 	if _, ok := validStatuses[charge.Status]; !ok {
 		return errors.New("mupag: API returned an invalid charge status")
 	}
-	if charge.AmountCents < 100 || charge.AmountCents > maxMoneyCents {
+	if charge.AmountCents < 1 || charge.AmountCents > maxMoneyCents {
 		return errors.New("mupag: API returned an invalid charge amount")
 	}
 	return nil
@@ -130,6 +130,9 @@ func (page *ChargePage) validateResponse() error {
 	if page == nil {
 		return errors.New("mupag: API returned an invalid charge page")
 	}
+	if len(page.Data) > 100 {
+		return errors.New("mupag: API returned more than 100 charges in one page")
+	}
 	if page.NextCursor != "" {
 		if err := validateOpaqueCursor(page.NextCursor); err != nil {
 			return errors.New("mupag: API returned invalid next_cursor")
@@ -149,6 +152,7 @@ type chargeListResponse struct {
 	expectedStatus         string
 	expectedCreatedAtFrom  time.Time
 	expectedCreatedAtTo    time.Time
+	expectedLimit          int
 	correlateCreatedAtFrom bool
 	correlateCreatedAtTo   bool
 }
@@ -160,6 +164,9 @@ func (response *chargeListResponse) validateResponse() error {
 	page := response.page()
 	if err := page.validateResponse(); err != nil {
 		return err
+	}
+	if len(page.Data) > response.expectedLimit {
+		return errors.New("mupag: API returned more charges than the requested page limit")
 	}
 	for index := range page.Data {
 		charge := &page.Data[index]
@@ -433,7 +440,11 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 		query.Set("cursor", params.Cursor)
 	}
 
-	response := chargeListResponse{expectedStatus: params.Status}
+	expectedLimit := params.Limit
+	if expectedLimit == 0 {
+		expectedLimit = 25
+	}
+	response := chargeListResponse{expectedStatus: params.Status, expectedLimit: expectedLimit}
 	if params.CreatedAtFrom != nil {
 		response.expectedCreatedAtFrom = params.CreatedAtFrom.UTC()
 		response.correlateCreatedAtFrom = true

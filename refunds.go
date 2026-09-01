@@ -109,6 +109,9 @@ func (page *RefundPage) validateResponse() error {
 	if page == nil {
 		return errors.New("mupag: API returned an invalid refund page")
 	}
+	if len(page.Refunds) > 100 {
+		return errors.New("mupag: API returned more than 100 refunds in one page")
+	}
 	if page.NextCursor != "" {
 		if err := validateOpaqueCursor(page.NextCursor); err != nil {
 			return errors.New("mupag: API returned invalid next_cursor")
@@ -126,6 +129,7 @@ type refundListResponse struct {
 	Refunds          *[]Refund `json:"refunds"`
 	NextCursor       string    `json:"next_cursor,omitempty"`
 	expectedChargeID string
+	expectedLimit    int
 }
 
 func (response *refundListResponse) validateResponse() error {
@@ -135,6 +139,9 @@ func (response *refundListResponse) validateResponse() error {
 	page := response.page()
 	if err := page.validateResponse(); err != nil {
 		return err
+	}
+	if len(page.Refunds) > response.expectedLimit {
+		return errors.New("mupag: API returned more refunds than the requested page limit")
 	}
 	for index := range page.Refunds {
 		if page.Refunds[index].ChargeID != response.expectedChargeID {
@@ -215,7 +222,11 @@ func (service *RefundsService) ListByCharge(ctx context.Context, chargeID string
 	if params.Cursor != "" {
 		query.Set("cursor", params.Cursor)
 	}
-	response := refundListResponse{expectedChargeID: chargeID}
+	expectedLimit := params.Limit
+	if expectedLimit == 0 {
+		expectedLimit = 25
+	}
+	response := refundListResponse{expectedChargeID: chargeID, expectedLimit: expectedLimit}
 	path := "/v1/charges/" + url.PathEscape(chargeID) + "/refunds"
 	if err := service.client.do(ctx, http.MethodGet, path, query, nil, &response); err != nil {
 		return nil, err

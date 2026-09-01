@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 		},
 		{
 			name: "charge amount below minimum",
-			body: `{"data":[{"charge_id":"charge_1","amount_cents":99,"status":"pending"}]}`,
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":0,"status":"pending"}]}`,
 		},
 		{
 			name: "unsafe next cursor",
@@ -105,6 +106,55 @@ func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 			}
 			if requests != 1 {
 				t.Fatalf("network requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
+func TestChargesListAcceptsOneCentItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":1,"status":"paid","created_at":"2026-08-31T12:00:00Z"}]}`)
+	}))
+	defer server.Close()
+
+	page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{})
+	if err != nil || page == nil || len(page.Data) != 1 || page.Data[0].AmountCents != 1 {
+		t.Fatalf("page = %#v, err = %v", page, err)
+	}
+}
+
+func TestChargesListRejectsResponsesBeyondRequestedLimit(t *testing.T) {
+	charge := `{"charge_id":"charge_1","amount_cents":1,"status":"paid","created_at":"2026-08-31T12:00:00Z"}`
+	tests := []struct {
+		name      string
+		params    mupag.ChargeListParams
+		itemCount int
+		wantError bool
+	}{
+		{name: "default limit", itemCount: 26, wantError: true},
+		{name: "requested limit", params: mupag.ChargeListParams{Limit: 2}, itemCount: 3, wantError: true},
+		{name: "exact requested limit", params: mupag.ChargeListParams{Limit: 2}, itemCount: 2},
+		{name: "public maximum", params: mupag.ChargeListParams{Limit: 100}, itemCount: 100},
+		{name: "above public maximum", params: mupag.ChargeListParams{Limit: 100}, itemCount: 101, wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"data":[` + strings.TrimSuffix(strings.Repeat(charge+",", test.itemCount), ",") + `]}`
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), test.params)
+			if test.wantError {
+				if err == nil || page != nil {
+					t.Fatalf("page = %#v, err = %v; want bounded-page error", page, err)
+				}
+				return
+			}
+			if err != nil || page == nil || len(page.Data) != test.itemCount {
+				t.Fatalf("page = %#v, err = %v", page, err)
 			}
 		})
 	}

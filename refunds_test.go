@@ -240,6 +240,47 @@ func TestRefundsListByChargeCorrelatesItems(t *testing.T) {
 	}
 }
 
+func TestRefundsListByChargeRejectsResponsesBeyondRequestedLimit(t *testing.T) {
+	refund := `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":1,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}`
+	tests := []struct {
+		name      string
+		params    mupag.RefundListParams
+		itemCount int
+		wantError bool
+	}{
+		{name: "default limit", itemCount: 26, wantError: true},
+		{name: "requested limit", params: mupag.RefundListParams{Limit: 2}, itemCount: 3, wantError: true},
+		{name: "exact requested limit", params: mupag.RefundListParams{Limit: 2}, itemCount: 2},
+		{name: "public maximum", params: mupag.RefundListParams{Limit: 100}, itemCount: 100},
+		{name: "above public maximum", params: mupag.RefundListParams{Limit: 100}, itemCount: 101, wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"refunds":[` + strings.TrimSuffix(strings.Repeat(refund+",", test.itemCount), ",") + `]}`
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writeJSON(writer, http.StatusOK, body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Refunds.ListByCharge(
+				context.Background(),
+				"charge_1",
+				test.params,
+			)
+			if test.wantError {
+				if err == nil || page != nil {
+					t.Fatalf("page = %#v, err = %v; want bounded-page error", page, err)
+				}
+				return
+			}
+			if err != nil || page == nil || len(page.Refunds) != test.itemCount {
+				t.Fatalf("page = %#v, err = %v", page, err)
+			}
+		})
+	}
+}
+
 func TestRefundsListByChargeRequiresRefundCollection(t *testing.T) {
 	tests := []struct {
 		name      string
