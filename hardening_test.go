@@ -447,6 +447,9 @@ func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
 		apply func(*mupag.ChargeCreateParams)
 	}{
 		{name: "description", apply: func(params *mupag.ChargeCreateParams) { params.Description = "invoice 4111 1111 1111 1111" }},
+		{name: "description with Unicode format separators", apply: func(params *mupag.ChargeCreateParams) {
+			params.Description = "invoice 4111\u200b1111\u200b1111\u200b1111"
+		}},
 		{name: "external reference", apply: func(params *mupag.ChargeCreateParams) { params.ExternalReference = "order_4111111111111111" }},
 		{name: "affiliate code", apply: func(params *mupag.ChargeCreateParams) { params.AffiliateCode = "affiliate-4111111111111111" }},
 		{name: "coupon code", apply: func(params *mupag.ChargeCreateParams) { params.CouponCode = "SAVE-4111111111111111" }},

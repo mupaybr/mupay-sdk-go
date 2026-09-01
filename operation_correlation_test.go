@@ -111,6 +111,28 @@ func TestChargeCreateCorrelatesResponseAmount(t *testing.T) {
 	}
 }
 
+func TestChargeCreateReturnsValidatedPaymentMethodEcho(t *testing.T) {
+	var attempts int
+	client := testClientWithResults(
+		t,
+		0,
+		[]roundTripResult{{response: jsonHTTPResponse(http.StatusCreated, `{"charge_id":"charge_1","status":"pending","amount_cents":100,"payment_method":"pix"}`)}},
+		&attempts,
+		nil,
+	)
+
+	charge, err := client.Charges.Create(context.Background(), validPixCharge())
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if charge == nil || charge.PaymentMethod != "pix" {
+		t.Fatalf("charge = %#v, want payment_method pix", charge)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
 func TestChargeCreateDoesNotConfirmCouponDiscountAfterAmbiguousRetry(t *testing.T) {
 	var attempts int
 	var sentKeys []string

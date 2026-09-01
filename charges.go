@@ -141,6 +141,7 @@ func (response *chargeCreateResponse) validatePaymentMethodEcho() error {
 		actual == nil || *actual != response.expectedPaymentMethod {
 		return errors.New("mupag: API returned a charge payment method that does not match the request")
 	}
+	response.Charge.PaymentMethod = *actual
 	return nil
 }
 
@@ -181,6 +182,11 @@ type ChargePage struct {
 	NextCursor string   `json:"next_cursor,omitempty"`
 }
 
+type chargeListItem struct {
+	Charge
+	PaymentMethod json.RawMessage `json:"payment_method,omitempty"`
+}
+
 func (page *ChargePage) validateResponse() error {
 	if page == nil {
 		return errors.New("mupag: API returned an invalid charge page")
@@ -202,8 +208,8 @@ func (page *ChargePage) validateResponse() error {
 }
 
 type chargeListResponse struct {
-	Data                   *[]Charge `json:"data"`
-	NextCursor             string    `json:"next_cursor,omitempty"`
+	Data                   *[]chargeListItem `json:"data"`
+	NextCursor             string            `json:"next_cursor,omitempty"`
 	expectedStatus         string
 	expectedPaymentMethod  string
 	expectedCreatedAtFrom  time.Time
@@ -216,6 +222,20 @@ type chargeListResponse struct {
 func (response *chargeListResponse) validateResponse() error {
 	if response == nil || response.Data == nil {
 		return errors.New("mupag: API returned an invalid charge page")
+	}
+	for index := range *response.Data {
+		item := &(*response.Data)[index]
+		if item.PaymentMethod == nil {
+			continue
+		}
+		var actual *string
+		if err := json.Unmarshal(item.PaymentMethod, &actual); err != nil {
+			return errors.New("mupag: API returned an invalid charge payment method")
+		}
+		item.Charge.PaymentMethod = ""
+		if actual != nil {
+			item.Charge.PaymentMethod = *actual
+		}
 	}
 	page := response.page()
 	if err := page.validateResponse(); err != nil {
@@ -232,7 +252,8 @@ func (response *chargeListResponse) validateResponse() error {
 		if response.expectedStatus != "" && charge.Status != response.expectedStatus {
 			return errors.New("mupag: API returned a charge outside the requested status")
 		}
-		if response.expectedPaymentMethod != "" && charge.PaymentMethod != "" && charge.PaymentMethod != response.expectedPaymentMethod {
+		item := &(*response.Data)[index]
+		if response.expectedPaymentMethod != "" && item.PaymentMethod != nil && charge.PaymentMethod != response.expectedPaymentMethod {
 			return errors.New("mupag: API returned a charge outside the requested payment method")
 		}
 		if response.correlateCreatedAtFrom && charge.CreatedAt.Before(response.expectedCreatedAtFrom) {
@@ -246,8 +267,13 @@ func (response *chargeListResponse) validateResponse() error {
 }
 
 func (response *chargeListResponse) page() *ChargePage {
+	items := *response.Data
+	data := make([]Charge, len(items))
+	for index := range items {
+		data[index] = items[index].Charge
+	}
 	return &ChargePage{
-		Data:       *response.Data,
+		Data:       data,
 		NextCursor: response.NextCursor,
 	}
 }
@@ -546,7 +572,7 @@ func containsPANLikeSequence(value string) bool {
 					return true
 				}
 			}
-		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character):
+		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character) || unicode.Is(unicode.Cf, character):
 			continue
 		default:
 			digits = digits[:0]

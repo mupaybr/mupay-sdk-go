@@ -3,6 +3,7 @@ package mupag_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -340,17 +341,44 @@ func TestChargesListAllowsFiltersOmittedFromResponseSchema(t *testing.T) {
 	}
 }
 
-func TestChargesListRejectsExplicitlyDivergentPaymentMethod(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Get("payment_method") != "pix" {
-			t.Fatalf("query = %v", request.URL.Query())
-		}
-		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":"credit_card","created_at":"2026-08-31T12:00:00Z"}]}`)
+func TestChargesListRejectsExplicitlyInvalidPaymentMethodForFilter(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		paymentMethod string
+	}{
+		{name: "divergent", paymentMethod: `"credit_card"`},
+		{name: "null", paymentMethod: `null`},
+		{name: "empty", paymentMethod: `""`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Query().Get("payment_method") != "pix" {
+					t.Fatalf("query = %v", request.URL.Query())
+				}
+				body := fmt.Sprintf(`{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":%s,"created_at":"2026-08-31T12:00:00Z"}]}`, test.paymentMethod)
+				writeJSON(writer, http.StatusOK, body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{PaymentMethod: "pix"})
+			if err == nil || page != nil {
+				t.Fatalf("page = %#v, err = %v, want payment method filter error", page, err)
+			}
+		})
+	}
+}
+
+func TestChargesListReturnsMatchingPaymentMethod(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","payment_method":"pix","created_at":"2026-08-31T12:00:00Z"}]}`)
 	}))
 	defer server.Close()
 
 	page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{PaymentMethod: "pix"})
-	if err == nil || page != nil {
-		t.Fatalf("page = %#v, err = %v, want divergent filter error", page, err)
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if page == nil || len(page.Data) != 1 || page.Data[0].PaymentMethod != "pix" {
+		t.Fatalf("page = %#v, want matching public payment method", page)
 	}
 }
