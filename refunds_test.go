@@ -50,7 +50,7 @@ func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		writeJSON(writer, http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested"}`)
+		writeJSON(writer, http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested","reason":"requested_by_customer","requested_at":"2026-08-31T12:00:00Z"}`)
 	}))
 	defer server.Close()
 
@@ -81,12 +81,12 @@ func TestRefundsGetAndListByChargeUseBoundedReadContracts(t *testing.T) {
 			if request.Method != http.MethodGet {
 				t.Fatalf("get method = %s", request.Method)
 			}
-			writeJSON(writer, http.StatusOK, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}`)
+			writeJSON(writer, http.StatusOK, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}`)
 		case "/v1/charges/charge_1/refunds":
 			if request.URL.Query().Get("limit") != "25" || request.URL.Query().Get("cursor") != "cursor_1" {
 				t.Fatalf("query = %v", request.URL.Query())
 			}
-			writeJSON(writer, http.StatusOK, `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"cursor_2"}`)
+			writeJSON(writer, http.StatusOK, `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"cursor_2"}`)
 		default:
 			t.Fatalf("unexpected path %s", request.URL.Path)
 		}
@@ -152,23 +152,23 @@ func TestRefundsListByChargeRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 	}{
 		{
 			name: "invalid refund item",
-			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"},{"refund_id":"..","charge_id":"charge_1","amount_cents":100,"status":"completed"}]}`,
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"},{"refund_id":"..","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}]}`,
 		},
 		{
 			name: "unsafe next cursor",
-			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"bad cursor"}`,
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"bad cursor"}`,
 		},
 		{
 			name: "undecodable next cursor",
-			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"A"}`,
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"A"}`,
 		},
 		{
 			name: "padded next cursor",
-			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"YQ=="}`,
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"YQ=="}`,
 		},
 		{
 			name: "non-canonical next cursor",
-			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"AB"}`,
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"AB"}`,
 		},
 	}
 
@@ -208,7 +208,7 @@ func TestRefundsGetCorrelatesRequestedID(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-				writeJSON(writer, http.StatusOK, `{"refund_id":"`+test.responseRefundID+`","charge_id":"charge_1","amount_cents":100,"status":"completed"}`)
+				writeJSON(writer, http.StatusOK, `{"refund_id":"`+test.responseRefundID+`","charge_id":"charge_1","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}`)
 			}))
 			defer server.Close()
 
@@ -239,7 +239,7 @@ func TestRefundsListByChargeCorrelatesItems(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-				writeJSON(writer, http.StatusOK, `{"refunds":[{"refund_id":"refund_1","charge_id":"`+test.responseChargeID+`","amount_cents":100,"status":"completed"}]}`)
+				writeJSON(writer, http.StatusOK, `{"refunds":[{"refund_id":"refund_1","charge_id":"`+test.responseChargeID+`","amount_cents":100,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}]}`)
 			}))
 			defer server.Close()
 

@@ -130,14 +130,14 @@ func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 			name:     "partial refund matches charge and amount",
 			chargeID: "charge_1",
 			params:   mupag.RefundCreateParams{AmountCents: &partialAmount},
-			body:     `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested"}`,
+			body:     `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`,
 			key:      "refund-partial-match",
 		},
 		{
 			name:        "partial refund has different charge",
 			chargeID:    "charge_1",
 			params:      mupag.RefundCreateParams{AmountCents: &partialAmount},
-			body:        `{"refund_id":"refund_1","charge_id":"charge_2","amount_cents":100,"status":"requested"}`,
+			body:        `{"refund_id":"refund_1","charge_id":"charge_2","amount_cents":100,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`,
 			key:         "refund-partial-charge-mismatch",
 			wantUnknown: true,
 		},
@@ -145,7 +145,7 @@ func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 			name:        "partial refund has different amount",
 			chargeID:    "charge_1",
 			params:      mupag.RefundCreateParams{AmountCents: &partialAmount},
-			body:        `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":200,"status":"requested"}`,
+			body:        `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":200,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`,
 			key:         "refund-partial-amount-mismatch",
 			wantUnknown: true,
 		},
@@ -153,14 +153,14 @@ func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 			name:     "full refund does not invent amount correlation",
 			chargeID: "charge_1",
 			params:   mupag.RefundCreateParams{Full: true},
-			body:     `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":275,"status":"requested"}`,
+			body:     `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":275,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`,
 			key:      "refund-full-match",
 		},
 		{
 			name:        "full refund has different charge",
 			chargeID:    "charge_1",
 			params:      mupag.RefundCreateParams{Full: true},
-			body:        `{"refund_id":"refund_1","charge_id":"charge_2","amount_cents":275,"status":"requested"}`,
+			body:        `{"refund_id":"refund_1","charge_id":"charge_2","amount_cents":275,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`,
 			key:         "refund-full-charge-mismatch",
 			wantUnknown: true,
 		},
@@ -194,6 +194,35 @@ func TestRefundCreateCorrelatesKnownRequestFields(t *testing.T) {
 				t.Fatalf("attempts = %d, want 1", attempts)
 			}
 		})
+	}
+}
+
+func TestFullRefundWithoutModeEchoDoesNotConfirmAfterAmbiguousRetry(t *testing.T) {
+	var attempts int
+	client := testClientWithResults(
+		t,
+		1,
+		[]roundTripResult{
+			{response: jsonHTTPResponse(http.StatusServiceUnavailable, `{"code":"temporarily_unavailable"}`)},
+			{response: jsonHTTPResponse(http.StatusAccepted, `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":275,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}`)},
+		},
+		&attempts,
+		nil,
+	)
+
+	refund, err := client.Refunds.Create(
+		context.Background(),
+		"charge_1",
+		mupag.RefundCreateParams{Full: true},
+		mupag.WithIdempotencyKey("refund-full-ambiguous-key"),
+	)
+
+	assertCorrelationOutcome(t, err, "refund-full-ambiguous-key", true)
+	if refund != nil {
+		t.Fatalf("refund = %#v, want nil", refund)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
 	}
 }
 

@@ -47,6 +47,9 @@ func (refund *Refund) validateResponse() error {
 	if !validRefundStatus(refund.Status) {
 		return errors.New("mupag: API returned an invalid refund status")
 	}
+	if refund.RequestedAt == nil {
+		return errors.New("mupag: API returned a refund without requested_at")
+	}
 	return nil
 }
 
@@ -63,7 +66,9 @@ type refundCreateResponse struct {
 	Refund
 	expectedChargeID    string
 	expectedAmountCents int64
+	expectedReason      string
 	correlateAmount     bool
+	correlateReason     bool
 }
 
 func (response *refundCreateResponse) validateResponse() error {
@@ -75,6 +80,16 @@ func (response *refundCreateResponse) validateResponse() error {
 	}
 	if response.correlateAmount && response.AmountCents != response.expectedAmountCents {
 		return errors.New("mupag: API returned a refund amount that does not match the request")
+	}
+	if response.correlateReason && response.Reason != response.expectedReason {
+		return errors.New("mupag: API returned a refund reason that does not match the request")
+	}
+	return nil
+}
+
+func (response *refundCreateResponse) validateResponseAfterAmbiguousRetry() error {
+	if !response.correlateAmount {
+		return errors.New("mupag: full refund response does not confirm the requested mode after an ambiguous attempt")
 	}
 	return nil
 }
@@ -178,6 +193,8 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 	response := refundCreateResponse{
 		expectedChargeID: chargeID,
 		correlateAmount:  hasAmount,
+		expectedReason:   params.Reason,
+		correlateReason:  params.Reason != "",
 	}
 	if hasAmount {
 		response.expectedAmountCents = *params.AmountCents
