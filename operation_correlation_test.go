@@ -133,6 +133,50 @@ func TestChargeCreateReturnsValidatedPaymentMethodEcho(t *testing.T) {
 	}
 }
 
+func TestChargeCreateCorrelatesCustomerEcho(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		echo        string
+		wantUnknown bool
+	}{
+		{name: "matching customer_id", echo: `"customer_id":"cus_123"`},
+		{name: "matching customer.id", echo: `"customer":{"id":"cus_123"}`},
+		{name: "divergent customer_id", echo: `"customer_id":"cus_other"`, wantUnknown: true},
+		{name: "divergent customer.id", echo: `"customer":{"id":"cus_other"}`, wantUnknown: true},
+		{name: "null customer_id", echo: `"customer_id":null`, wantUnknown: true},
+		{name: "null customer.id", echo: `"customer":{"id":null}`, wantUnknown: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts int
+			body := fmt.Sprintf(`{"charge_id":"charge_1","status":"pending","amount_cents":100,%s}`, test.echo)
+			client := testClientWithResults(
+				t,
+				0,
+				[]roundTripResult{{response: jsonHTTPResponse(http.StatusCreated, body)}},
+				&attempts,
+				nil,
+			)
+			key := "charge-customer-echo"
+
+			charge, err := client.Charges.Create(
+				context.Background(),
+				validPixCharge(),
+				mupag.WithIdempotencyKey(key),
+			)
+			assertCorrelationOutcome(t, err, key, test.wantUnknown)
+			if test.wantUnknown && charge != nil {
+				t.Fatalf("charge = %#v, want nil for uncorrelated customer", charge)
+			}
+			if !test.wantUnknown && charge == nil {
+				t.Fatal("matching customer echo returned nil charge")
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
+	}
+}
+
 func TestChargeCreateDoesNotConfirmCouponDiscountAfterAmbiguousRetry(t *testing.T) {
 	var attempts int
 	var sentKeys []string
@@ -195,6 +239,16 @@ func TestChargeCreateDoesNotConfirmDivergentEchoAfterAmbiguousRetry(t *testing.T
 			name: "null payment method",
 			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"payment_method":null}`,
 			key:  "payment-method-null-retry-key",
+		},
+		{
+			name: "divergent customer_id",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"customer_id":"cus_other"}`,
+			key:  "customer-id-divergent-retry-key",
+		},
+		{
+			name: "divergent customer.id",
+			body: `{"charge_id":"charge_1","status":"under_review","amount_cents":100,"customer":{"id":"cus_other"}}`,
+			key:  "nested-customer-id-divergent-retry-key",
 		},
 	}
 

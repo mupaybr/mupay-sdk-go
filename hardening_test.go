@@ -292,6 +292,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
 		"cardVerificationNumber", "securityValue", "cardIdentificationNumber",
 		"csc", "cid", "csc2", "cid3",
+		"cav2", "cardCav2", "cav2_value", "cardCav2Code",
 		"cardCsc", "cardCid", "amexCid", "americanExpressCid", "csc_value", "cidCode", "cardCsc2Number", "cardCid3Value", "cardSecurityNumber",
 	} {
 		t.Run(key, func(t *testing.T) {
@@ -450,11 +451,15 @@ func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
 		{name: "description with Unicode format separators", apply: func(params *mupag.ChargeCreateParams) {
 			params.Description = "invoice 4111\u200b1111\u200b1111\u200b1111"
 		}},
+		{name: "description with Unicode combining marks", apply: func(params *mupag.ChargeCreateParams) {
+			params.Description = "invoice 4111\u03011111\u03011111\u03011111"
+		}},
 		{name: "external reference", apply: func(params *mupag.ChargeCreateParams) { params.ExternalReference = "order_4111111111111111" }},
 		{name: "affiliate code", apply: func(params *mupag.ChargeCreateParams) { params.AffiliateCode = "affiliate-4111111111111111" }},
 		{name: "coupon code", apply: func(params *mupag.ChargeCreateParams) { params.CouponCode = "SAVE-4111111111111111" }},
 		{name: "customer name", apply: func(params *mupag.ChargeCreateParams) { params.Customer.Name = "Ana 4111111111111111" }},
 		{name: "customer email", apply: func(params *mupag.ChargeCreateParams) { params.Customer.Email = "4111111111111111@example.com" }},
+		{name: "customer id", apply: func(params *mupag.ChargeCreateParams) { params.Customer.ID = "4111111111111111" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -470,7 +475,7 @@ func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
 	}
 }
 
-func TestChargeCreateAllowsPANLikeDigitsInStructuredIdentityFields(t *testing.T) {
+func TestChargeCreateAllowsNonPANLongDigitsInStructuredIdentityFields(t *testing.T) {
 	requests := 0
 	client := mupag.NewClient(
 		mupag.WithAPIKey("sk_test_123"),
@@ -482,7 +487,7 @@ func TestChargeCreateAllowsPANLikeDigitsInStructuredIdentityFields(t *testing.T)
 		})}),
 	)
 	params := validPixCharge()
-	params.Customer.ID = "customer_4111111111111111"
+	params.Customer.ID = "customer_1000000000001000"
 	params.Customer.TaxID = "41234567890120"
 
 	if _, err := client.Charges.Create(context.Background(), params); err != nil {
@@ -529,6 +534,10 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 			metadata: map[string]any{"note": "4111|1111|1111|1111"},
 		},
 		{
+			name:     "JSON string with Unicode combining marks",
+			metadata: map[string]any{"note": "4111\u03011111\u03011111\u03011111"},
+		},
+		{
 			name:     "formatted PAN after unrelated numeric metadata",
 			metadata: map[string]any{"note": "order 9 / 4111 1111 1111 1111"},
 		},
@@ -545,6 +554,10 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 		{
 			name:     "exact JSON number",
 			metadata: map[string]any{"note": int64(4111111111111111)},
+		},
+		{
+			name:     "PAN in JSON object key",
+			metadata: map[string]any{"4111111111111111": "sensitive key"},
 		},
 	}
 	for _, pan := range []string{

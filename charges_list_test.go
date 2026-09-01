@@ -382,3 +382,29 @@ func TestChargesListReturnsMatchingPaymentMethod(t *testing.T) {
 		t.Fatalf("page = %#v, want matching public payment method", page)
 	}
 }
+
+func TestChargesListRejectsDivergentCustomerEchoForFilter(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		echo string
+	}{
+		{name: "customer_id", echo: `"customer_id":"customer_2"`},
+		{name: "customer.id", echo: `"customer":{"id":"customer_2"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Query().Get("customer_id") != "customer_1" {
+					t.Fatalf("query = %v", request.URL.Query())
+				}
+				body := fmt.Sprintf(`{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T12:00:00Z",%s}]}`, test.echo)
+				writeJSON(writer, http.StatusOK, body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{CustomerID: "customer_1"})
+			if err == nil || page != nil {
+				t.Fatalf("page = %#v, err = %v, want customer filter error", page, err)
+			}
+		})
+	}
+}

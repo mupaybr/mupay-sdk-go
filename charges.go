@@ -110,9 +110,12 @@ type chargeCreateResponse struct {
 	expectedAmountCents   int64
 	expectedCouponCode    string
 	expectedPaymentMethod string
+	expectedCustomerID    string
 	allowDiscount         bool
 	CouponCode            json.RawMessage `json:"coupon_code,omitempty"`
 	PaymentMethod         json.RawMessage `json:"payment_method,omitempty"`
+	CustomerID            json.RawMessage `json:"customer_id,omitempty"`
+	Customer              json.RawMessage `json:"customer,omitempty"`
 }
 
 func (response *chargeCreateResponse) validateResponse() error {
@@ -124,6 +127,9 @@ func (response *chargeCreateResponse) validateResponse() error {
 	}
 	if err := response.validateCouponEcho(); err != nil {
 		return err
+	}
+	if hasDivergentCustomerEcho(response.expectedCustomerID, response.CustomerID, response.Customer) {
+		return errors.New("mupag: API returned a charge customer that does not match the request")
 	}
 	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
 		(!response.allowDiscount && response.AmountCents != response.expectedAmountCents) {
@@ -158,6 +164,29 @@ func (response *chargeCreateResponse) validateCouponEcho() error {
 	return nil
 }
 
+func hasDivergentCustomerEcho(expected string, customerID, customer json.RawMessage) bool {
+	if expected == "" {
+		return false
+	}
+	if customerID != nil && !rawStringEquals(customerID, expected) {
+		return true
+	}
+	if customer == nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(customer, &fields); err != nil {
+		return true
+	}
+	nestedID, present := fields["id"]
+	return present && !rawStringEquals(nestedID, expected)
+}
+
+func rawStringEquals(raw json.RawMessage, expected string) bool {
+	var actual *string
+	return json.Unmarshal(raw, &actual) == nil && actual != nil && *actual == expected
+}
+
 func (response *chargeCreateResponse) validateResponseAfterAmbiguousRetry() error {
 	if response.AmountCents != response.expectedAmountCents {
 		return errors.New("mupag: discounted charge response cannot be correlated after an ambiguous retry")
@@ -185,6 +214,8 @@ type ChargePage struct {
 type chargeListItem struct {
 	Charge
 	PaymentMethod json.RawMessage `json:"payment_method,omitempty"`
+	CustomerID    json.RawMessage `json:"customer_id,omitempty"`
+	Customer      json.RawMessage `json:"customer,omitempty"`
 }
 
 func (page *ChargePage) validateResponse() error {
@@ -212,6 +243,7 @@ type chargeListResponse struct {
 	NextCursor             string            `json:"next_cursor,omitempty"`
 	expectedStatus         string
 	expectedPaymentMethod  string
+	expectedCustomerID     string
 	expectedCreatedAtFrom  time.Time
 	expectedCreatedAtTo    time.Time
 	expectedLimit          int
@@ -225,16 +257,18 @@ func (response *chargeListResponse) validateResponse() error {
 	}
 	for index := range *response.Data {
 		item := &(*response.Data)[index]
-		if item.PaymentMethod == nil {
-			continue
+		if item.PaymentMethod != nil {
+			var actual *string
+			if err := json.Unmarshal(item.PaymentMethod, &actual); err != nil {
+				return errors.New("mupag: API returned an invalid charge payment method")
+			}
+			item.Charge.PaymentMethod = ""
+			if actual != nil {
+				item.Charge.PaymentMethod = *actual
+			}
 		}
-		var actual *string
-		if err := json.Unmarshal(item.PaymentMethod, &actual); err != nil {
-			return errors.New("mupag: API returned an invalid charge payment method")
-		}
-		item.Charge.PaymentMethod = ""
-		if actual != nil {
-			item.Charge.PaymentMethod = *actual
+		if hasDivergentCustomerEcho(response.expectedCustomerID, item.CustomerID, item.Customer) {
+			return errors.New("mupag: API returned a charge outside the requested customer")
 		}
 	}
 	page := response.page()
@@ -302,6 +336,7 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 		expectedAmountCents:   params.AmountCents,
 		expectedCouponCode:    strings.TrimSpace(params.CouponCode),
 		expectedPaymentMethod: params.PaymentMethod,
+		expectedCustomerID:    params.Customer.ID,
 		allowDiscount:         strings.TrimSpace(params.CouponCode) != "",
 	}
 	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, request, &response, opts...)
@@ -320,6 +355,9 @@ func validateChargeCreateParams(params ChargeCreateParams, metadataSnapshot *jso
 	}
 	if params.Customer.ID != "" && !validResourceID(params.Customer.ID) {
 		return errors.New("mupag: invalid customer id")
+	}
+	if params.Customer.ID != "" && containsPANLikeSequence(params.Customer.ID) {
+		return errors.New("mupag: customer id cannot contain a payment card number")
 	}
 	if invalidText(params.Customer.Name, 200) || invalidText(params.Customer.Email, 254) || !validEmail(params.Customer.Email) || !validTaxID(params.Customer.TaxID) {
 		return errors.New("mupag: customer name, email and 11/14-digit tax_id are required")
@@ -467,7 +505,7 @@ func validateMetadata(metadata map[string]any) (json.RawMessage, error) {
 					}
 					return -1
 				}, strings.ToLower(key))
-				if isForbiddenSensitiveMetadataKey(compact) {
+				if isForbiddenSensitiveMetadataKey(compact) || containsPANLikeSequence(key) {
 					return nil, errors.New("mupag: metadata contains forbidden sensitive field")
 				}
 				stack = append(stack, struct {
@@ -517,7 +555,7 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 			return true
 		}
 	}
-	for _, token := range []string{"csc", "cid"} {
+	for _, token := range []string{"csc", "cid", "cav"} {
 		index := strings.LastIndex(base, token)
 		if index == -1 {
 			continue
@@ -575,7 +613,7 @@ func containsPANLikeSequence(value string) bool {
 					return true
 				}
 			}
-		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character) || unicode.Is(unicode.Cf, character):
+		case unicode.IsSpace(character) || unicode.IsPunct(character) || unicode.IsSymbol(character) || unicode.Is(unicode.Cf, character) || unicode.IsMark(character):
 			continue
 		default:
 			digits = digits[:0]
@@ -689,6 +727,7 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 	response := chargeListResponse{
 		expectedStatus:        params.Status,
 		expectedPaymentMethod: params.PaymentMethod,
+		expectedCustomerID:    params.CustomerID,
 		expectedLimit:         expectedLimit,
 	}
 	if params.CreatedAtFrom != nil {
