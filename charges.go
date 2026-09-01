@@ -642,13 +642,14 @@ func containsPANInChargeFreeText(params ChargeCreateParams) bool {
 func containsPANLikeSequence(value string) bool {
 	digits := make([]byte, 0, 19)
 	for _, character := range value {
+		decimalDigit, isDecimalDigit := unicodeDecimalDigitASCII(character)
 		switch {
-		case character >= '0' && character <= '9':
+		case isDecimalDigit:
 			if len(digits) == 19 {
 				copy(digits, digits[1:])
 				digits = digits[:18]
 			}
-			digits = append(digits, byte(character))
+			digits = append(digits, decimalDigit)
 			for length := 12; length <= len(digits); length++ {
 				if validPANSequence(digits[len(digits)-length:]) {
 					return true
@@ -661,6 +662,20 @@ func containsPANLikeSequence(value string) bool {
 		}
 	}
 	return false
+}
+
+func unicodeDecimalDigitASCII(character rune) (byte, bool) {
+	if character >= '0' && character <= '9' {
+		return byte(character), true
+	}
+	if !unicode.IsDigit(character) {
+		return 0, false
+	}
+	blockStart := character
+	for blockStart > 0 && unicode.IsDigit(blockStart-1) {
+		blockStart--
+	}
+	return byte('0' + (character-blockStart)%10), true
 }
 
 func validPANSequence(digits []byte) bool {

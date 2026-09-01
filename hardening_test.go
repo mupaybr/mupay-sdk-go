@@ -489,6 +489,12 @@ func TestChargeCreateRejectsPANInFreeTextFieldsBeforeNetwork(t *testing.T) {
 		{name: "description with Unicode combining marks", apply: func(params *mupag.ChargeCreateParams) {
 			params.Description = "invoice 4111\u03011111\u03011111\u03011111"
 		}},
+		{name: "description with full-width decimal digits", apply: func(params *mupag.ChargeCreateParams) {
+			params.Description = "invoice ４１１１ １１１１ １１１１ １１１１"
+		}},
+		{name: "description with Arabic-Indic decimal digits", apply: func(params *mupag.ChargeCreateParams) {
+			params.Description = "invoice ٤١١١ ١١١١ ١١١١ ١١١١"
+		}},
 		{name: "external reference", apply: func(params *mupag.ChargeCreateParams) { params.ExternalReference = "order_4111111111111111" }},
 		{name: "affiliate code", apply: func(params *mupag.ChargeCreateParams) { params.AffiliateCode = "affiliate-4111111111111111" }},
 		{name: "coupon code", apply: func(params *mupag.ChargeCreateParams) { params.CouponCode = "SAVE-4111111111111111" }},
@@ -573,6 +579,14 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 			metadata: map[string]any{"note": "4111\u03011111\u03011111\u03011111"},
 		},
 		{
+			name:     "JSON string with full-width decimal digits",
+			metadata: map[string]any{"note": "４１１１ １１１１ １１１１ １１１１"},
+		},
+		{
+			name:     "JSON string with Arabic-Indic decimal digits",
+			metadata: map[string]any{"note": "٤١١١ ١١١١ ١١١١ ١١١١"},
+		},
+		{
 			name:     "formatted PAN after unrelated numeric metadata",
 			metadata: map[string]any{"note": "order 9 / 4111 1111 1111 1111"},
 		},
@@ -637,6 +651,15 @@ func TestChargeCreateRejectsPANLikeMetadataValuesRecursivelyBeforeNetwork(t *tes
 	}
 	if requests != 1 {
 		t.Fatalf("network requests = %d, want 1 after safe metadata", requests)
+	}
+
+	params = validPixCharge()
+	params.Metadata = map[string]any{"note": "١٠٠٠ ٠٠٠٠ ٠٠٠٠ ١٠٠٠"}
+	if _, err := client.Charges.Create(context.Background(), params); err != nil {
+		t.Fatalf("non-Luhn Unicode decimal metadata was rejected: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("network requests = %d, want 2 after safe Unicode metadata", requests)
 	}
 }
 
