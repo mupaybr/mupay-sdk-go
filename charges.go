@@ -485,7 +485,7 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 		strings.HasSuffix(base, "verificationcode") ||
 		strings.HasSuffix(base, "verificationvalue") ||
 		strings.HasSuffix(base, "verificationnumber") ||
-		strings.HasSuffix(base, "identificationnumber")
+		strings.HasSuffix(base, "cardidentificationnumber")
 }
 
 func containsPANLikeSequence(value string) bool {

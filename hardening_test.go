@@ -306,6 +306,30 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 	}
 }
 
+func TestChargeCreateAllowsNonCardIdentificationMetadataKeys(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithRetryPolicy(mupag.RetryPolicy{MaxRetries: 0}),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return jsonHTTPResponse(http.StatusCreated, validChargeJSON()), nil
+		})}),
+	)
+
+	for _, key := range []string{"taxIdentificationNumber", "orderIdentificationNumber"} {
+		params := validPixCharge()
+		params.Metadata = map[string]any{key: "identifier_123"}
+		if _, err := client.Charges.Create(context.Background(), params); err != nil {
+			t.Fatalf("non-card metadata key %q was rejected: %v", key, err)
+		}
+	}
+	if requests != 2 {
+		t.Fatalf("network requests = %d, want 2", requests)
+	}
+}
+
 func TestChargeCreateSendsTheValidatedMetadataSnapshot(t *testing.T) {
 	var requestBody string
 	client := mupag.NewClient(
