@@ -144,15 +144,39 @@ func (page *ChargePage) validateResponse() error {
 }
 
 type chargeListResponse struct {
-	Data       *[]Charge `json:"data"`
-	NextCursor string    `json:"next_cursor,omitempty"`
+	Data                   *[]Charge `json:"data"`
+	NextCursor             string    `json:"next_cursor,omitempty"`
+	expectedStatus         string
+	expectedCreatedAtFrom  time.Time
+	expectedCreatedAtTo    time.Time
+	correlateCreatedAtFrom bool
+	correlateCreatedAtTo   bool
 }
 
 func (response *chargeListResponse) validateResponse() error {
 	if response == nil || response.Data == nil {
 		return errors.New("mupag: API returned an invalid charge page")
 	}
-	return response.page().validateResponse()
+	page := response.page()
+	if err := page.validateResponse(); err != nil {
+		return err
+	}
+	for index := range page.Data {
+		charge := &page.Data[index]
+		if charge.CreatedAt == nil {
+			return errors.New("mupag: API returned a charge without created_at")
+		}
+		if response.expectedStatus != "" && charge.Status != response.expectedStatus {
+			return errors.New("mupag: API returned a charge outside the requested status")
+		}
+		if response.correlateCreatedAtFrom && charge.CreatedAt.Before(response.expectedCreatedAtFrom) {
+			return errors.New("mupag: API returned a charge before created_at_from")
+		}
+		if response.correlateCreatedAtTo && !charge.CreatedAt.Before(response.expectedCreatedAtTo) {
+			return errors.New("mupag: API returned a charge at or after created_at_to")
+		}
+	}
+	return nil
 }
 
 func (response *chargeListResponse) page() *ChargePage {
@@ -389,7 +413,15 @@ func (service *ChargesService) List(ctx context.Context, params ChargeListParams
 		query.Set("cursor", params.Cursor)
 	}
 
-	var response chargeListResponse
+	response := chargeListResponse{expectedStatus: params.Status}
+	if params.CreatedAtFrom != nil {
+		response.expectedCreatedAtFrom = params.CreatedAtFrom.UTC()
+		response.correlateCreatedAtFrom = true
+	}
+	if params.CreatedAtTo != nil {
+		response.expectedCreatedAtTo = params.CreatedAtTo.UTC()
+		response.correlateCreatedAtTo = true
+	}
 	if err := service.client.do(ctx, http.MethodGet, "/v1/charges", query, nil, &response); err != nil {
 		return nil, err
 	}

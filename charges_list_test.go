@@ -144,3 +144,132 @@ func TestChargesListRequiresDataCollection(t *testing.T) {
 		})
 	}
 }
+
+func TestChargesListCorrelatesStatusFilter(t *testing.T) {
+	tests := []struct {
+		name            string
+		requestedStatus string
+		returnedStatus  string
+		wantError       bool
+	}{
+		{name: "matching status", requestedStatus: "paid", returnedStatus: "paid"},
+		{name: "different status", requestedStatus: "paid", returnedStatus: "refunded", wantError: true},
+		{name: "no status filter", returnedStatus: "refunded"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requests++
+				if request.URL.Query().Get("status") != test.requestedStatus {
+					t.Fatalf("status query = %q", request.URL.Query().Get("status"))
+				}
+				writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"`+test.returnedStatus+`","created_at":"2026-08-31T12:00:00Z"}]}`)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{Status: test.requestedStatus})
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("page = %#v, want status correlation error", page)
+				}
+				var outcomeErr *mupag.OutcomeUnknownError
+				if errors.As(err, &outcomeErr) {
+					t.Fatalf("read error was reported as unknown outcome: %v", err)
+				}
+				if page != nil {
+					t.Fatalf("page = %#v, want nil", page)
+				}
+			} else if err != nil || page == nil || len(page.Data) != 1 || page.Data[0].Status != test.returnedStatus {
+				t.Fatalf("page = %#v, err = %v", page, err)
+			}
+			if requests != 1 {
+				t.Fatalf("requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
+func TestChargesListCorrelatesCreatedAtBounds(t *testing.T) {
+	from := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		params    mupag.ChargeListParams
+		body      string
+		wantError bool
+	}{
+		{
+			name:   "inclusive lower bound",
+			params: mupag.ChargeListParams{CreatedAtFrom: &from},
+			body:   `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T12:00:00Z"}]}`,
+		},
+		{
+			name:      "before lower bound",
+			params:    mupag.ChargeListParams{CreatedAtFrom: &from},
+			body:      `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T11:59:59Z"}]}`,
+			wantError: true,
+		},
+		{
+			name:   "before exclusive upper bound",
+			params: mupag.ChargeListParams{CreatedAtTo: &to},
+			body:   `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T12:59:59Z"}]}`,
+		},
+		{
+			name:      "at exclusive upper bound",
+			params:    mupag.ChargeListParams{CreatedAtTo: &to},
+			body:      `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T13:00:00Z"}]}`,
+			wantError: true,
+		},
+		{
+			name:      "missing required created at",
+			body:      `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid"}]}`,
+			wantError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				requests++
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			page, err := newTestClient(server.URL).Charges.List(context.Background(), test.params)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("page = %#v, want created_at correlation error", page)
+				}
+				if page != nil {
+					t.Fatalf("page = %#v, want nil", page)
+				}
+			} else if err != nil || page == nil || len(page.Data) != 1 {
+				t.Fatalf("page = %#v, err = %v", page, err)
+			}
+			if requests != 1 {
+				t.Fatalf("requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
+func TestChargesListAllowsFiltersOmittedFromResponseSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("customer_id") != "customer_1" || request.URL.Query().Get("payment_method") != "pix" {
+			t.Fatalf("query = %v", request.URL.Query())
+		}
+		writeJSON(writer, http.StatusOK, `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"paid","created_at":"2026-08-31T12:00:00Z"}]}`)
+	}))
+	defer server.Close()
+
+	page, err := newTestClient(server.URL).Charges.List(context.Background(), mupag.ChargeListParams{
+		CustomerID:    "customer_1",
+		PaymentMethod: "pix",
+	})
+	if err != nil || page == nil || len(page.Data) != 1 {
+		t.Fatalf("page = %#v, err = %v", page, err)
+	}
+}
