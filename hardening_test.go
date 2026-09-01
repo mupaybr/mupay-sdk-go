@@ -130,10 +130,10 @@ func TestClientRejectsInvalidExplicitIdempotencyKeyBeforeNetwork(t *testing.T) {
 		})}),
 	)
 
-	for _, key := range []string{" ", strings.Repeat("a", 129), "line\nbreak", "non-ascii-ç"} {
+	for _, key := range []string{" ", strings.Repeat("a", 129), "line\nbreak", "non-ascii-ç", "4111111111111111"} {
 		_, err := client.Charges.Create(
 			context.Background(),
-			mupag.ChargeCreateParams{},
+			validPixCharge(),
 			mupag.WithIdempotencyKey(key),
 		)
 		if err == nil {
@@ -157,13 +157,21 @@ func TestSubscriptionCancelRejectsPathInjectionAndUnknownModeBeforeNetwork(t *te
 	)
 
 	for _, params := range []struct {
-		id   string
-		mode string
-	}{{"../charges", "immediate"}, {".", "immediate"}, {"..", "immediate"}, {"sub_123", "later"}} {
+		id     string
+		mode   string
+		reason string
+	}{
+		{id: "../charges", mode: "immediate"},
+		{id: ".", mode: "immediate"},
+		{id: "..", mode: "immediate"},
+		{id: "sub_123", mode: "later"},
+		{id: "4111111111111111", mode: "immediate"},
+		{id: "sub_123", mode: "immediate", reason: "customer used 4111 1111 1111 1111"},
+	} {
 		_, err := client.Subscriptions.Cancel(
 			context.Background(),
 			params.id,
-			mupag.CancelSubscriptionParams{Mode: params.mode},
+			mupag.CancelSubscriptionParams{Mode: params.mode, Reason: params.reason},
 		)
 		if err == nil {
 			t.Fatalf("cancel accepted id=%q mode=%q", params.id, params.mode)

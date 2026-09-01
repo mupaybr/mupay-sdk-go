@@ -39,6 +39,51 @@ func TestRefundsCreateRequiresExplicitFullOrPartialIntent(t *testing.T) {
 	}
 }
 
+func TestRefundOperationsRejectPANBeforeNetwork(t *testing.T) {
+	requests := 0
+	client := mupag.NewClient(
+		mupag.WithAPIKey("sk_test_123"),
+		mupag.WithTestEnvironment(),
+		mupag.WithHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			requests++
+			return nil, errors.New("network must not be reached")
+		})}),
+	)
+	pan := "4111111111111111"
+
+	operations := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "create charge id", run: func() error {
+			_, err := client.Refunds.Create(context.Background(), pan, mupag.RefundCreateParams{Full: true})
+			return err
+		}},
+		{name: "create reason", run: func() error {
+			_, err := client.Refunds.Create(context.Background(), "charge_1", mupag.RefundCreateParams{Full: true, Reason: "customer used 4111 1111 1111 1111"})
+			return err
+		}},
+		{name: "get refund id", run: func() error {
+			_, err := client.Refunds.Get(context.Background(), pan)
+			return err
+		}},
+		{name: "list charge id", run: func() error {
+			_, err := client.Refunds.ListByCharge(context.Background(), pan, mupag.RefundListParams{})
+			return err
+		}},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			if err := operation.run(); err == nil {
+				t.Fatal("PAN-bearing refund operation was accepted")
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("network requests = %d, want 0", requests)
+	}
+}
+
 func TestRefundsCreateForwardsExplicitFullIntentAndIdempotency(t *testing.T) {
 	var body map[string]any
 	var idempotencyKey string

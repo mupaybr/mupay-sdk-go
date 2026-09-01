@@ -53,6 +53,7 @@ func TestChargesListRejectsInvalidFiltersBeforeNetwork(t *testing.T) {
 
 	for _, params := range []mupag.ChargeListParams{
 		{Status: "DROP TABLE"},
+		{CustomerID: "4111111111111111"},
 		{Limit: 101},
 		{Cursor: "bad cursor"},
 		{Cursor: "A"},

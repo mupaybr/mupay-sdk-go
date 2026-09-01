@@ -97,7 +97,7 @@ type CancelSubscriptionParams struct {
 
 // Cancel encerra uma assinatura usando POST idempotente.
 func (service *SubscriptionsService) Cancel(ctx context.Context, id string, params CancelSubscriptionParams, opts ...RequestOption) (*Subscription, error) {
-	if !validResourceID(id) {
+	if !validResourceID(id) || containsPANLikeSequence(id) {
 		return nil, errors.New("mupag: invalid subscription id")
 	}
 	if params.Mode != "immediate" && params.Mode != "end_of_period" {
@@ -105,6 +105,9 @@ func (service *SubscriptionsService) Cancel(ctx context.Context, id string, para
 	}
 	if len(params.Reason) > 500 {
 		return nil, errors.New("mupag: subscription cancel reason exceeds 500 bytes")
+	}
+	if containsPANLikeSequence(params.Reason) {
+		return nil, errors.New("mupag: subscription cancel reason cannot contain a payment card number")
 	}
 	response := subscriptionCancelResponse{expectedID: id, expectedMode: params.Mode}
 	path := "/v1/subscriptions/" + url.PathEscape(id) + "/cancel"

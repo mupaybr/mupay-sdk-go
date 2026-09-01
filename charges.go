@@ -762,7 +762,7 @@ func validateChargeListParams(params ChargeListParams) error {
 			return errors.New("mupag: invalid charge status filter")
 		}
 	}
-	if params.CustomerID != "" && !validResourceID(params.CustomerID) {
+	if params.CustomerID != "" && (!validResourceID(params.CustomerID) || containsPANLikeSequence(params.CustomerID)) {
 		return errors.New("mupag: invalid customer id")
 	}
 	if params.PaymentMethod != "" && params.PaymentMethod != "pix" && params.PaymentMethod != "credit_card" {

@@ -400,6 +400,9 @@ func validateIdempotencyKey(key string) error {
 	if len(key) < 1 || len(key) > 128 {
 		return errors.New("mupag: invalid idempotency key length")
 	}
+	if containsPANLikeSequence(key) {
+		return errors.New("mupag: idempotency key cannot contain a payment card number")
+	}
 	for _, character := range []byte(key) {
 		if character < 0x21 || character > 0x7e {
 			return errors.New("mupag: idempotency key must contain visible ASCII without spaces")

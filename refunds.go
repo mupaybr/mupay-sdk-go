@@ -180,7 +180,7 @@ func (response *refundListResponse) page() *RefundPage {
 
 // Create solicita estorno parcial ou total com Idempotency-Key estável.
 func (service *RefundsService) Create(ctx context.Context, chargeID string, params RefundCreateParams, opts ...RequestOption) (*Refund, error) {
-	if !validResourceID(chargeID) {
+	if !validResourceID(chargeID) || containsPANLikeSequence(chargeID) {
 		return nil, errors.New("mupag: invalid charge id")
 	}
 	hasAmount := params.AmountCents != nil
@@ -195,6 +195,9 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 	})
 	if len(params.Reason) > 500 {
 		return nil, errors.New("mupag: refund reason exceeds 500 bytes")
+	}
+	if containsPANLikeSequence(params.Reason) {
+		return nil, errors.New("mupag: refund reason cannot contain a payment card number")
 	}
 
 	response := refundCreateResponse{
@@ -215,7 +218,7 @@ func (service *RefundsService) Create(ctx context.Context, chargeID string, para
 
 // Get consulta um estorno no escopo do merchant autenticado.
 func (service *RefundsService) Get(ctx context.Context, refundID string) (*Refund, error) {
-	if !validResourceID(refundID) {
+	if !validResourceID(refundID) || containsPANLikeSequence(refundID) {
 		return nil, errors.New("mupag: invalid refund id")
 	}
 	response := refundGetResponse{expectedRefundID: refundID}
@@ -228,7 +231,7 @@ func (service *RefundsService) Get(ctx context.Context, refundID string) (*Refun
 
 // ListByCharge lista estornos com limite e cursor opaco bounded.
 func (service *RefundsService) ListByCharge(ctx context.Context, chargeID string, params RefundListParams) (*RefundPage, error) {
-	if !validResourceID(chargeID) {
+	if !validResourceID(chargeID) || containsPANLikeSequence(chargeID) {
 		return nil, errors.New("mupag: invalid charge id")
 	}
 	if params.Limit < 0 || params.Limit > 100 {
