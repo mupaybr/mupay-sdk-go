@@ -360,7 +360,17 @@ func validateMetadata(metadata map[string]any) error {
 			for key, child := range value {
 				normalized := strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(key))
 				switch normalized {
-				case "__proto__", "prototype", "constructor", "pan", "cvv", "cvc", "card_number", "security_code":
+				case "__proto__", "prototype", "constructor":
+					return errors.New("mupag: metadata contains forbidden sensitive field")
+				}
+				compact := strings.Map(func(character rune) rune {
+					if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
+						return character
+					}
+					return -1
+				}, strings.ToLower(key))
+				switch compact {
+				case "pan", "cvv", "cvc", "cardnumber", "securitycode":
 					return errors.New("mupag: metadata contains forbidden sensitive field")
 				}
 				stack = append(stack, struct {

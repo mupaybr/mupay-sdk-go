@@ -243,6 +243,8 @@ func TestChargeCreateRejectsUnsafeOrAmbiguousPayloadsBeforeNetwork(t *testing.T)
 		{AmountCents: 100, PaymentMethod: "cash", Customer: validCustomer()},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: mupag.CustomerParams{}},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Metadata: map[string]any{"cvv": "123"}},
+		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Metadata: map[string]any{"cardNumber": "4111111111111111"}},
+		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), Metadata: map[string]any{"nested": map[string]any{"security.code": "123"}}},
 		{AmountCents: 100, PaymentMethod: "credit_card", Customer: validCustomer(), PayerIP: "203.0.113.10"},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), CardTokenID: "tok_123"},
 		{AmountCents: 100, PaymentMethod: "pix", Customer: validCustomer(), SplitRules: []mupag.SplitRuleParams{{RecipientID: "recipient_1", ValueType: "fixed_amount"}}},
