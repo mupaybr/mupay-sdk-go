@@ -401,7 +401,7 @@ func validateMetadata(metadata map[string]any) error {
 				return errors.New("mupag: metadata contains possible payment card number")
 			}
 		case json.Number:
-			if validPANSequence([]byte(value.String())) {
+			if containsPANLikeSequence(value.String()) {
 				return errors.New("mupag: metadata contains possible payment card number")
 			}
 		}
@@ -410,31 +410,48 @@ func validateMetadata(metadata map[string]any) error {
 }
 
 func containsPANLikeSequence(value string) bool {
+	groups := make([][]byte, 0, 8)
 	digits := make([]byte, 0, 19)
-	tooLong := false
-	flush := func() bool {
-		matched := !tooLong && validPANSequence(digits)
+	flushGroup := func() bool {
+		if len(digits) == 0 {
+			return false
+		}
+		groups = append(groups, append([]byte(nil), digits...))
 		digits = digits[:0]
-		tooLong = false
-		return matched
+		return panInDigitGroups(groups)
 	}
 	for _, character := range value {
 		switch {
 		case character >= '0' && character <= '9':
-			if len(digits) < 20 {
-				digits = append(digits, byte(character))
-			} else {
-				tooLong = true
-			}
+			digits = append(digits, byte(character))
 		case unicode.IsSpace(character) || unicode.IsPunct(character):
-			continue
+			if flushGroup() {
+				return true
+			}
 		default:
-			if flush() {
+			if flushGroup() {
+				return true
+			}
+			groups = groups[:0]
+		}
+	}
+	return flushGroup()
+}
+
+func panInDigitGroups(groups [][]byte) bool {
+	for start := range groups {
+		candidate := make([]byte, 0, 19)
+		for end := start; end < len(groups); end++ {
+			if len(candidate)+len(groups[end]) > 19 {
+				break
+			}
+			candidate = append(candidate, groups[end]...)
+			if validPANSequence(candidate) {
 				return true
 			}
 		}
 	}
-	return flush()
+	return false
 }
 
 func validPANSequence(digits []byte) bool {

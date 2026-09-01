@@ -226,6 +226,51 @@ func TestRefundsGetCorrelatesRequestedID(t *testing.T) {
 	}
 }
 
+func TestRefundResponsesRejectOversizedReasons(t *testing.T) {
+	oversizedReason := strings.Repeat("r", 501)
+	tests := []struct {
+		name      string
+		path      string
+		operation func(*mupag.Client) error
+		body      string
+	}{
+		{
+			name: "get",
+			path: "/v1/refunds/refund_1",
+			operation: func(client *mupag.Client) error {
+				_, err := client.Refunds.Get(context.Background(), "refund_1")
+				return err
+			},
+			body: `{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","reason":"` + oversizedReason + `","requested_at":"2026-08-31T12:00:00Z"}`,
+		},
+		{
+			name: "list",
+			path: "/v1/charges/charge_1/refunds",
+			operation: func(client *mupag.Client) error {
+				_, err := client.Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{})
+				return err
+			},
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed","reason":"` + oversizedReason + `","requested_at":"2026-08-31T12:00:00Z"}]}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path != test.path {
+					t.Fatalf("path = %s, want %s", request.URL.Path, test.path)
+				}
+				writeJSON(writer, http.StatusOK, test.body)
+			}))
+			defer server.Close()
+
+			if err := test.operation(newTestClient(server.URL)); err == nil {
+				t.Fatal("oversized refund reason was accepted")
+			}
+		})
+	}
+}
+
 func TestRefundsListByChargeCorrelatesItems(t *testing.T) {
 	tests := []struct {
 		name             string

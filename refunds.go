@@ -50,6 +50,9 @@ func (refund *Refund) validateResponse() error {
 	if refund.RequestedAt == nil {
 		return errors.New("mupag: API returned a refund without requested_at")
 	}
+	if len(refund.Reason) > 500 {
+		return errors.New("mupag: API returned a refund reason exceeding 500 bytes")
+	}
 	return nil
 }
 
