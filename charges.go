@@ -435,7 +435,7 @@ func validateSplitRules(rules []SplitRuleParams, amountCents int64) error {
 	allocatedCents := int64(0)
 	totalBPS := 0
 	for _, rule := range rules {
-		if !validResourceID(rule.RecipientID) {
+		if !validResourceID(rule.RecipientID) || containsPANLikeSequence(rule.RecipientID) {
 			return errors.New("mupag: invalid split recipient_id")
 		}
 		var ruleCents int64

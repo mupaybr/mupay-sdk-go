@@ -221,6 +221,14 @@ func TestChargeCreateValidatesAggregateSplitAllocation(t *testing.T) {
 			},
 			wantError: true,
 		},
+		{
+			name:        "recipient id contains PAN",
+			amountCents: 1_000,
+			rules: []mupag.SplitRuleParams{
+				{RecipientID: "4111111111111111", ValueType: "fixed_amount", ValueCents: 1_000},
+			},
+			wantError: true,
+		},
 	}
 
 	for _, test := range tests {
