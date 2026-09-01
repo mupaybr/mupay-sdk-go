@@ -111,11 +111,13 @@ type chargeCreateResponse struct {
 	expectedCouponCode    string
 	expectedPaymentMethod string
 	expectedCustomerID    string
+	expectedExternalRef   string
 	allowDiscount         bool
 	CouponCode            json.RawMessage `json:"coupon_code,omitempty"`
 	PaymentMethod         json.RawMessage `json:"payment_method,omitempty"`
 	CustomerID            json.RawMessage `json:"customer_id,omitempty"`
 	Customer              json.RawMessage `json:"customer,omitempty"`
+	ExternalReference     json.RawMessage `json:"external_reference,omitempty"`
 }
 
 func (response *chargeCreateResponse) validateResponse() error {
@@ -130,6 +132,11 @@ func (response *chargeCreateResponse) validateResponse() error {
 	}
 	if hasDivergentCustomerEcho(response.expectedCustomerID, response.CustomerID, response.Customer) {
 		return errors.New("mupag: API returned a charge customer that does not match the request")
+	}
+	if response.expectedExternalRef != "" &&
+		response.ExternalReference != nil &&
+		!rawStringEquals(response.ExternalReference, response.expectedExternalRef) {
+		return errors.New("mupag: API returned a charge external reference that does not match the request")
 	}
 	if (response.allowDiscount && response.AmountCents > response.expectedAmountCents) ||
 		(!response.allowDiscount && response.AmountCents != response.expectedAmountCents) {
@@ -337,6 +344,7 @@ func (service *ChargesService) Create(ctx context.Context, params ChargeCreatePa
 		expectedCouponCode:    strings.TrimSpace(params.CouponCode),
 		expectedPaymentMethod: params.PaymentMethod,
 		expectedCustomerID:    params.Customer.ID,
+		expectedExternalRef:   params.ExternalReference,
 		allowDiscount:         strings.TrimSpace(params.CouponCode) != "",
 	}
 	err := service.client.do(ctx, http.MethodPost, "/v1/charges", nil, request, &response, opts...)
