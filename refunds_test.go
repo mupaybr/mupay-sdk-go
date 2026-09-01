@@ -131,6 +131,15 @@ func TestRefundReadsRejectUnsafeIdentifiersAndPaginationBeforeNetwork(t *testing
 	if _, err := client.Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{Cursor: "bad cursor"}); err == nil {
 		t.Fatal("unsafe cursor accepted")
 	}
+	if _, err := client.Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{Cursor: "A"}); err == nil {
+		t.Fatal("undecodable cursor accepted")
+	}
+	if _, err := client.Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{Cursor: "YQ=="}); err == nil {
+		t.Fatal("padded cursor accepted")
+	}
+	if _, err := client.Refunds.ListByCharge(context.Background(), "charge_1", mupag.RefundListParams{Cursor: "AB"}); err == nil {
+		t.Fatal("non-canonical cursor accepted")
+	}
 	if requests != 0 {
 		t.Fatalf("network requests = %d, want 0", requests)
 	}
@@ -148,6 +157,18 @@ func TestRefundsListByChargeRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 		{
 			name: "unsafe next cursor",
 			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"bad cursor"}`,
+		},
+		{
+			name: "undecodable next cursor",
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"A"}`,
+		},
+		{
+			name: "padded next cursor",
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"YQ=="}`,
+		},
+		{
+			name: "non-canonical next cursor",
+			body: `{"refunds":[{"refund_id":"refund_1","charge_id":"charge_1","amount_cents":100,"status":"completed"}],"next_cursor":"AB"}`,
 		},
 	}
 

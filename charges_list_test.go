@@ -54,6 +54,9 @@ func TestChargesListRejectsInvalidFiltersBeforeNetwork(t *testing.T) {
 		{Status: "DROP TABLE"},
 		{Limit: 101},
 		{Cursor: "bad cursor"},
+		{Cursor: "A"},
+		{Cursor: "YQ=="},
+		{Cursor: "AB"},
 		{CreatedAtFrom: &later, CreatedAtTo: &now},
 	} {
 		if _, err := client.Charges.List(context.Background(), params); err == nil {
@@ -89,6 +92,18 @@ func TestChargesListRejectsInvalidItemsAndResponseCursor(t *testing.T) {
 		{
 			name: "unsafe next cursor",
 			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending"}],"next_cursor":"bad cursor"}`,
+		},
+		{
+			name: "undecodable next cursor",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending","created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"A"}`,
+		},
+		{
+			name: "padded next cursor",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending","created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"YQ=="}`,
+		},
+		{
+			name: "non-canonical next cursor",
+			body: `{"data":[{"charge_id":"charge_1","amount_cents":100,"status":"pending","created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"AB"}`,
 		},
 	}
 

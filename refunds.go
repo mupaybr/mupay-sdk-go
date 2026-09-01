@@ -2,6 +2,7 @@ package mupag
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/url"
@@ -245,6 +246,9 @@ func validateOpaqueCursor(cursor string) error {
 			character != '_' && character != '-' {
 			return errors.New("mupag: invalid pagination cursor")
 		}
+	}
+	if _, err := base64.RawURLEncoding.Strict().DecodeString(cursor); err != nil {
+		return errors.New("mupag: invalid pagination cursor")
 	}
 	return nil
 }
