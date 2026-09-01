@@ -480,9 +480,24 @@ func isForbiddenSensitiveMetadataKey(compact string) bool {
 	}
 
 	base := strings.TrimRight(compact, "0123456789")
-	for _, token := range []string{"cvv", "cvc", "csc", "cid"} {
+	for _, token := range []string{"cvv", "cvc"} {
 		index := strings.LastIndex(base, token)
 		if index == -1 {
+			continue
+		}
+		descriptor := strings.TrimLeft(base[index+len(token):], "0123456789")
+		switch descriptor {
+		case "", "value", "code", "number":
+			return true
+		}
+	}
+	for _, token := range []string{"csc", "cid"} {
+		index := strings.LastIndex(base, token)
+		if index == -1 {
+			continue
+		}
+		qualifier := base[:index]
+		if qualifier != "" && !strings.HasSuffix(qualifier, "card") {
 			continue
 		}
 		descriptor := strings.TrimLeft(base[index+len(token):], "0123456789")

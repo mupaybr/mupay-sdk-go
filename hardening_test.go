@@ -291,6 +291,7 @@ func TestChargeCreateRejectsSensitiveMetadataKeyAliasesBeforeNetwork(t *testing.
 		"cvv_value", "cvcValue", "cardCvvCode", "cardCvcNumber",
 		"cvv2_value", "cvc2Code", "cardCvv3Number",
 		"cardVerificationNumber", "securityValue", "cardIdentificationNumber",
+		"csc", "cid", "csc2", "cid3",
 		"cardCsc", "cardCid", "csc_value", "cidCode", "cardCsc2Number", "cardCid3Value", "cardSecurityNumber",
 	} {
 		t.Run(key, func(t *testing.T) {
@@ -321,15 +322,18 @@ func TestChargeCreateAllowsNonCardSensitiveSuffixMetadataKeys(t *testing.T) {
 	for _, key := range []string{
 		"taxIdentificationNumber", "orderIdentificationNumber",
 		"socialSecurityNumber", "accountSecurityNumber",
+		"acid", "placid", "orderCidSuffix",
 	} {
-		params := validPixCharge()
-		params.Metadata = map[string]any{key: "identifier_123"}
-		if _, err := client.Charges.Create(context.Background(), params); err != nil {
-			t.Fatalf("non-card metadata key %q was rejected: %v", key, err)
-		}
+		t.Run(key, func(t *testing.T) {
+			params := validPixCharge()
+			params.Metadata = map[string]any{key: "identifier_123"}
+			if _, err := client.Charges.Create(context.Background(), params); err != nil {
+				t.Fatalf("non-card metadata key %q was rejected: %v", key, err)
+			}
+		})
 	}
-	if requests != 4 {
-		t.Fatalf("network requests = %d, want 4", requests)
+	if requests != 7 {
+		t.Fatalf("network requests = %d, want 7", requests)
 	}
 }
 
