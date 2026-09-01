@@ -383,7 +383,7 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		writeJSON(w, http.StatusOK, `{"id":"sub_123","status":"canceled","cancel_at_period_end":false}`)
+		writeJSON(w, http.StatusOK, `{"id":"sub_123","status":"canceled","cancel_at_period_end":false,"cancellation_reason":"pedido do cliente"}`)
 	}))
 	defer server.Close()
 
@@ -392,13 +392,16 @@ func TestSubscriptionsCancelPostsCancelRequest(t *testing.T) {
 	subscription, err := client.Subscriptions.Cancel(
 		context.Background(),
 		"sub_123",
-		mupag.CancelSubscriptionParams{Mode: "immediate", Reason: "pedido do cliente"},
+		mupag.CancelSubscriptionParams{Mode: "immediate", Reason: "  pedido do cliente\t"},
 		mupag.WithIdempotencyKey("cancel_sub_123"),
 	)
 	if err != nil {
 		t.Fatalf("cancel subscription: %v", err)
 	}
-	if gotPath != "/v1/subscriptions/sub_123/cancel" || subscription.Status != "canceled" || body["mode"] != "immediate" {
+	if gotPath != "/v1/subscriptions/sub_123/cancel" ||
+		subscription.Status != "canceled" ||
+		body["mode"] != "immediate" ||
+		body["reason"] != "pedido do cliente" {
 		t.Fatalf("path=%q subscription=%+v body=%v", gotPath, subscription, body)
 	}
 }

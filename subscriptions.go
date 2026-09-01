@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // SubscriptionsService agrupa operacoes de assinaturas da API publica.
@@ -107,6 +108,7 @@ func (service *SubscriptionsService) Cancel(ctx context.Context, id string, para
 	if !validResourceID(id) || containsPANLikeSequence(id) {
 		return nil, errors.New("mupag: invalid subscription id")
 	}
+	params.Reason = strings.TrimSpace(params.Reason)
 	if params.Mode != "immediate" && params.Mode != "end_of_period" {
 		return nil, errors.New("mupag: subscription cancel mode must be immediate or end_of_period")
 	}
