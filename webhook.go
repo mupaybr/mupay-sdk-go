@@ -85,11 +85,7 @@ func (webhookVerifier) ConstructEvent(payload []byte, signatureHeader string, se
 		return nil, errors.New("invalid webhook timestamp")
 	}
 	signedAt := time.Unix(timestamp, 0)
-	age := options.now.Sub(signedAt)
-	if age < 0 {
-		age = -age
-	}
-	if age > options.tolerance {
+	if signedAt.Before(options.now.Add(-options.tolerance)) || signedAt.After(options.now.Add(options.tolerance)) {
 		return nil, errors.New("webhook timestamp outside tolerance")
 	}
 	expected := webhookSignature(timestampText, payload, secret)

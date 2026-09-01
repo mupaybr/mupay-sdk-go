@@ -66,6 +66,17 @@ func TestWebhookConstructEventRejectsStaleTimestamp(t *testing.T) {
 	}
 }
 
+func TestWebhookConstructEventRejectsFarFutureTimestampWithoutDurationOverflow(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	signedAt := time.Date(2340, time.September, 1, 0, 0, 0, 0, time.UTC)
+	payload := []byte(`{"id":"evt_123","type":"charge.paid","data":{"charge_id":"charge_1"}}`)
+	header := signatureHeader(signedAt, payload, "whsec_123")
+
+	if _, err := mupag.Webhooks.ConstructEvent(payload, header, "whsec_123", mupag.WithWebhookNow(now)); err == nil {
+		t.Fatal("accepted far-future webhook timestamp")
+	}
+}
+
 func TestWebhookConstructEventAcceptsCustomTolerance(t *testing.T) {
 	signedAt := time.Unix(1_700_000_000, 0)
 	now := signedAt.Add(6 * time.Minute)
