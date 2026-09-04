@@ -5,23 +5,23 @@ import (
 	"fmt"
 	"os"
 
-	mupaysdk "github.com/mupaybr/mupay/sdks/go"
+	mupag "github.com/mupaybr/mupag-sdk-go"
 )
 
 func main() {
-	client := mupaysdk.NewClient(
-		mupaysdk.WithAPIKey(os.Getenv("MUPAY_API_KEY")),
-		mupaysdk.WithTestEnvironment(),
+	client := mupag.NewClient(
+		mupag.WithAPIKey(os.Getenv("MUPAG_API_KEY")),
+		mupag.WithTestEnvironment(),
 	)
 
 	subscription, err := client.Subscriptions.Cancel(
 		context.Background(),
 		"sub_123",
-		mupaysdk.CancelSubscriptionParams{
+		mupag.CancelSubscriptionParams{
 			Mode:   "immediate",
 			Reason: "pedido do cliente",
 		},
-		mupaysdk.WithIdempotencyKey("cancel_sub_123"),
+		mupag.WithIdempotencyKey("cancel_sub_123"),
 	)
 	if err != nil {
 		panic(err)
